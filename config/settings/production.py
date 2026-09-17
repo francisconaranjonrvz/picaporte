@@ -5,14 +5,23 @@ durante el build, así que nada aquí puede abrir conexiones ni depender de
 variables que solo existan en runtime.
 """
 
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *
 from .base import env
 
 DEBUG = False
 SECRET_KEY = env("SECRET_KEY")
+if not SECRET_KEY:
+    # GitHub Actions pasa los secretos no definidos como cadena vacía.
+    raise ImproperlyConfigured("SECRET_KEY vacía: define el secreto en Vercel / GitHub.")
 
 # Neon: en Vercel la URL *-pooler* (PgBouncer, modo transacción); en Actions la directa.
 DATABASES = {"default": env.db("DATABASE_URL")}
+if not DATABASES["default"]:
+    raise ImproperlyConfigured(
+        "DATABASE_URL vacía o inválida: usa la URL pooled (Vercel) o directa (Actions)."
+    )
 if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
     DATABASES["default"].update(
         {

@@ -80,6 +80,16 @@ def test_production_exige_secret_key(monkeypatch):
         fresh_import("config.settings.production", monkeypatch, env)
 
 
+@pytest.mark.filterwarnings("ignore:Engine not recognized")  # django-environ con URL vacía
+@pytest.mark.parametrize("vacia", ["SECRET_KEY", "DATABASE_URL"])
+def test_production_rechaza_variables_vacias(monkeypatch, vacia):
+    # GitHub Actions inyecta los secretos no definidos como "" (no como ausentes).
+    env = {**PROD_ENV, vacia: ""}
+
+    with pytest.raises(ImproperlyConfigured, match=vacia):
+        fresh_import("config.settings.production", monkeypatch, env)
+
+
 def test_local_rechaza_ejecutarse_en_vercel(monkeypatch):
     with pytest.raises(ImproperlyConfigured, match=r"config\.settings\.production"):
         fresh_import("config.settings.local", monkeypatch, {"VERCEL": "1"})
