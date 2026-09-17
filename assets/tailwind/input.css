@@ -1,0 +1,154 @@
+/* Picaporte — hoja de entrada de Tailwind v4.
+   Compilar con `python scripts/tw.py build` -> static/css/app.css (versionado). */
+
+/* Fuentes de clases explícitas: nada depende del cwd ni de .gitignore. */
+@import "tailwindcss" source(none);
+@source "../../templates";
+@source "../../apps";
+
+@import "./theme.css";
+
+/* Plus Jakarta Sans (variable, OFL). URLs absolutas: el storage manifest las reescribe. */
+@font-face {
+  font-family: "Plus Jakarta Sans Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url("/static/fonts/plus-jakarta-sans-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Plus Jakarta Sans Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url("/static/fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased min-h-dvh;
+  }
+  [x-cloak] {
+    display: none !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Superficies */
+  .card {
+    @apply bg-surface rounded-2xl shadow-soft p-4;
+  }
+
+  /* Botones: la clase base la aplica el tag {% btn %}; aquí solo variantes reutilizables en HTML plano */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 font-semibold rounded-2xl min-h-11 px-4
+      bg-action-fill text-white shadow-soft transition duration-150 active:scale-[0.98]
+      hover:bg-action-fill/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action
+      focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /* Badges de estado (pastel + tinta AA) */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .badge-muted {
+    @apply bg-primary/40 text-muted;
+  }
+  .badge-primary {
+    @apply bg-primary text-ink;
+  }
+  .badge-success {
+    @apply bg-success text-success-ink;
+  }
+  .badge-warning {
+    @apply bg-warning text-warning-ink;
+  }
+  .badge-danger {
+    @apply bg-danger text-danger-ink;
+  }
+
+  /* Chips de filtro (toggle con aria-pressed) */
+  .chip {
+    @apply inline-flex items-center gap-1.5 min-h-9 rounded-full border border-primary bg-surface
+      px-3 text-sm font-medium text-ink transition duration-150 active:scale-[0.97]
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action;
+  }
+  .chip[aria-pressed="true"] {
+    @apply bg-action-fill border-action-fill text-white;
+  }
+
+  /* Campos de formulario */
+  .field-label {
+    @apply block text-sm font-semibold text-ink mb-1.5;
+  }
+  .field-input {
+    @apply block w-full min-h-11 rounded-2xl border border-primary bg-surface px-4 text-base text-ink
+      placeholder:text-muted/70 transition duration-150 focus:outline-none focus:border-action
+      focus:ring-2 focus:ring-action/40;
+  }
+  .field-error {
+    @apply mt-1.5 text-sm text-danger-ink;
+  }
+  .field-help {
+    @apply mt-1.5 text-sm text-muted;
+  }
+
+  /* Skeleton loader */
+  .skeleton {
+    @apply animate-pulse rounded-xl bg-primary/60;
+  }
+
+  /* Barra de navegación inferior (fija, respeta el notch) */
+  .tabbar {
+    @apply fixed inset-x-0 bottom-0 z-40 border-t border-primary/60 bg-surface/95 backdrop-blur;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tab {
+    @apply flex flex-1 flex-col items-center justify-center gap-0.5 min-h-14 text-[11px] font-semibold
+      text-muted transition duration-150 active:scale-95;
+  }
+  .tab[aria-current="page"] {
+    @apply text-action-fill;
+  }
+  .tab[aria-current="page"] .tab-icon {
+    @apply bg-primary;
+  }
+  .tab-icon {
+    @apply flex h-7 w-12 items-center justify-center rounded-full transition duration-180;
+  }
+
+  /* Barra de acción principal (alcanzable con el pulgar, encima de la tabbar) */
+  .action-bar {
+    @apply sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 -mx-4 mt-4 flex gap-2
+      border-t border-primary/60 bg-bg/95 px-4 py-3 backdrop-blur;
+  }
+
+  /* Toasts */
+  .toast {
+    @apply pointer-events-auto flex items-start gap-3 rounded-2xl bg-ink px-4 py-3 text-sm text-white
+      shadow-float;
+  }
+
+  /* Estado vacío */
+  .empty-state {
+    @apply flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed
+      border-primary bg-surface/60 px-6 py-10 text-center;
+  }
+}

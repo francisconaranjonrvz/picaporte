@@ -1,0 +1,2 @@
+{% comment %}Badge de estado. Uso: {% include "components/badge.html" with label="Visitado" variant="success" icon="check" %}{% endcomment %}
+{% load ui %}<span class="badge badge-{{ variant|default:'muted' }}">{% if icon %}{% icon icon "size-3.5" %}{% endif %}{{ label }}</span>

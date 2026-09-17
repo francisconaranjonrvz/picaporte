@@ -1,0 +1,66 @@
+{% load static django_htmx %}<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}{{ title|default:"Picaporte" }}{% endblock %} · Picaporte</title>
+  <meta name="description" content="Empresas de Barcelona donde entregar tu CV en mano, priorizadas y en ruta.">
+  <meta name="theme-color" content="#F5F9FF">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Picaporte">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="{% url 'manifest' %}">
+  <link rel="icon" href="{% static 'icons/favicon.svg' %}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon-180.png' %}">
+  <link rel="preload" href="{% static 'fonts/plus-jakarta-sans-latin-wght-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% htmx_script %}
+  <script>
+    // Toasts (mensajes del servidor + errores de red de HTMX). Debe registrarse antes de que arranque Alpine.
+    document.addEventListener("alpine:init", () => {
+      Alpine.data("toasts", () => ({
+        items: [],
+        seq: 0,
+        init() {
+          this.$el.querySelectorAll("[data-toast]").forEach((el) => this.add(el.dataset.toast));
+        },
+        add(text) {
+          const id = ++this.seq;
+          this.items.push({ id, text });
+          setTimeout(() => { this.items = this.items.filter((t) => t.id !== id); }, 4000);
+        },
+      }));
+    });
+    document.addEventListener("htmx:sendError", () => {
+      window.dispatchEvent(new CustomEvent("toast", { detail: "Sin conexión. Inténtalo de nuevo." }));
+    });
+  </script>
+  <script defer src="{% static 'vendor/alpine.min.js' %}"></script>
+  {% block head %}{% endblock %}
+</head>
+<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' class="{% block body_class %}{% endblock %}">
+  {% include "components/icons.svg" %}
+
+  <main id="main" class="mx-auto w-full max-w-lg px-4 pt-4 {% if user.is_authenticated %}pb-24{% else %}pb-8{% endif %}">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if user.is_authenticated %}{% include "components/bottom_nav.html" %}{% endif %}
+
+  <div id="toasts"
+       class="pointer-events-none fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex flex-col gap-2"
+       x-data="toasts" @toast.window="add($event.detail)" role="status" aria-live="polite">
+    {% for message in messages %}<span hidden data-toast="{{ message }}"></span>{% endfor %}
+    <template x-for="t in items" :key="t.id">
+      <div class="toast" x-transition.duration.200ms x-text="t.text"></div>
+    </template>
+  </div>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("{% url 'sw' %}", { updateViaCache: "none" });
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

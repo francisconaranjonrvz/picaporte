@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="text-2xl font-extrabold tracking-tight">Perfil</h1>
+  <p class="text-sm text-muted">Tu cuenta y el estado de la app.</p>
+</header>
+
+<div class="space-y-4">
+  {% card %}
+    <div class="flex items-center gap-3">
+      <span class="flex size-12 items-center justify-center rounded-full bg-primary text-action-fill">{% icon "user" "size-6" %}</span>
+      <div class="min-w-0">
+        <p class="truncate font-bold">{{ user.get_username }}</p>
+        <p class="truncate text-sm text-muted">{{ user.email|default:"Sin email" }}</p>
+      </div>
+    </div>
+  {% endcard %}
+
+  {% include "components/empty_state.html" with icon="pencil" title="CV y preferencias" text="En la fase 2 podrás subir tu CV y ajustar categorías, zonas e intereses." %}
+
+  {% card %}
+    <dl class="grid grid-cols-2 gap-y-2 text-sm">
+      <dt class="text-muted">Versión</dt><dd class="text-right font-mono">{{ APP_VERSION }}</dd>
+      <dt class="text-muted">Entorno</dt><dd class="text-right">{{ APP_ENV }}</dd>
+    </dl>
+  {% endcard %}
+
+  <form method="post" action="{% url 'logout' %}">
+    {% csrf_token %}
+    {% btn type="submit" variant="ghost" size="lg" %}{% icon "log-out" "size-5" %}Salir{% endbtn %}
+  </form>
+</div>
+{% endblock %}

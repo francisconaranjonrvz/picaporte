@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Django
+db.sqlite3
+staticfiles/
+
+# Entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Herramientas descargadas (binario de Tailwind)
+.tools/
+
+# Vercel
+.vercel/
+
+# Editores / SO
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.claude/

@@ -1,0 +1,78 @@
+[project]
+name = "picaporte"
+version = "0.1.0"
+description = "Encuentra empresas en Barcelona donde entregar tu CV en mano, priorízalas y planifica rutas."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "Django>=5.2,<5.3",
+  "psycopg[binary]>=3.2,<4",
+  "django-environ>=0.14,<1",
+  "whitenoise>=6.12,<7",
+  "django-htmx>=1.29,<2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-django>=4.14",
+  "pytest-cov>=6",
+  "ruff>=0.16",
+  "pre-commit>=4",
+  "resvg-py>=0.5",
+]
+
+# Vercel: entrypoint WSGI explícito (la detección zero-config también lo resuelve vía WSGI_APPLICATION).
+[tool.vercel]
+entrypoint = "config.wsgi:application"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+addopts = "--reuse-db --strict-markers -q"
+python_files = ["test_*.py"]
+testpaths = ["apps"]
+filterwarnings = ["error::DeprecationWarning:django"]
+
+[tool.coverage.run]
+branch = true
+source = ["apps", "config"]
+omit = ["*/migrations/*", "config/wsgi.py", "config/settings/local.py", "manage.py"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["**/migrations/**", ".venv", "staticfiles", ".tools"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "DJ", "S", "T20", "PT", "RUF"]
+ignore = [
+  "E501",   # el formateador gestiona la longitud de línea
+  "RUF012", # atributos de clase mutables (Meta, listas) son idiomáticos en Django
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106"]
+"conftest.py" = ["S106"]
+"config/settings/*.py" = ["F403", "F405", "S105"]
+"manage.py" = ["T20"]
+"scripts/*.py" = ["T20", "S310", "S603", "S607"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "apps"]
+section-order = ["future", "standard-library", "third-party", "django", "first-party", "local-folder"]
+
+[tool.ruff.lint.isort.sections]
+django = ["django"]
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false

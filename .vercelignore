@@ -1,0 +1,14 @@
+.git
+.venv
+.tools
+.claude
+docs
+.github
+assets
+scripts
+prompts
+staticfiles
+db.sqlite3
+.env
+.env.*
+conftest.py

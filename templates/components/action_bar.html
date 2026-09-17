@@ -1,0 +1,5 @@
+{% comment %}Barra de acción principal (a una mano). Uso: {% include "components/action_bar.html" with label="Marcar visitada" icon="check" href="#" secondary_label="Nota" secondary_icon="pencil" secondary_href="#" %}{% endcomment %}
+{% load ui %}<div class="action-bar">
+  {% if secondary_label %}{% btn href=secondary_href variant="secondary" size="md" cls="shrink-0" %}{% if secondary_icon %}{% icon secondary_icon "size-5" %}{% endif %}{{ secondary_label }}{% endbtn %}{% endif %}
+  {% btn href=href variant="primary" size="md" cls="flex-1" %}{% if icon %}{% icon icon "size-5" %}{% endif %}{{ label }}{% endbtn %}
+</div>

@@ -1,0 +1,2 @@
+{% comment %}Toast estático (los dinámicos los gestiona Alpine en base.html). Uso: {% include "components/toast.html" with text="Guardado" icon="check" %}{% endcomment %}
+{% load ui %}<div class="toast" role="status">{% if icon %}{% icon icon "mt-0.5 size-4 shrink-0" %}{% endif %}<span>{{ text }}</span></div>

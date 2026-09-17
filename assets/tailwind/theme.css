@@ -1,0 +1,32 @@
+/* Picaporte — tokens del design system (Tailwind v4, CSS-first).
+   Cada --color-* genera utilidades bg-*, text-*, border-*, ring-*.
+   Los pares texto/fondo permitidos y su contraste viven en apps/core/design.py. */
+@theme {
+  /* Paleta azul pastel */
+  --color-bg: #f5f9ff;
+  --color-surface: #ffffff;
+  --color-primary: #bfd7ff;       /* pastel: fondos, chips, skeleton, botón secundario */
+  --color-action: #5b8def;        /* iconos, bordes, focus ring, texto grande (3,23:1 = solo UI) */
+  --color-action-fill: #3a6bd0;   /* botón primario relleno con texto blanco (5,01:1 AA) */
+  --color-ink: #1e293b;
+  --color-muted: #64748b;
+
+  /* Estados (fondo pastel + tinta con AA >= 6:1) */
+  --color-success: #dcfce7;
+  --color-success-ink: #166534;
+  --color-warning: #fef3c7;
+  --color-warning-ink: #92400e;
+  --color-danger: #fee2e2;
+  --color-danger-ink: #991b1b;
+
+  /* Tipografía */
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Sombras suaves */
+  --shadow-soft: 0 1px 2px rgb(30 41 59 / 0.04), 0 8px 24px -8px rgb(91 141 239 / 0.18);
+  --shadow-float: 0 12px 32px -12px rgb(30 41 59 / 0.25);
+
+  /* Microinteracciones: 150-200 ms */
+  --default-transition-duration: 180ms;
+  --ease-app: cubic-bezier(0.2, 0, 0, 1);
+}

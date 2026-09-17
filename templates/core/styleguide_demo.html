@@ -1,0 +1,17 @@
+{% load ui %}
+{# Parcial cargado por HTMX en /styleguide: ejemplo de tarjeta de empresa (fase 5). #}
+{% card cls="space-y-3" %}
+  <div class="flex items-start gap-3">
+    <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-action-fill">{% icon "door-open" "size-5" %}</span>
+    <div class="min-w-0 flex-1">
+      <h3 class="truncate font-bold">Agencia Ejemplo</h3>
+      <p class="truncate text-sm text-muted">Publicidad · Poblenou (22@) · 650 m</p>
+    </div>
+    <span class="badge badge-success">Fit 82</span>
+  </div>
+  <p class="text-sm">Agencia independiente de branding y campañas; buscan perfiles junior de cuentas y eventos.</p>
+  <div class="flex gap-2 pt-1">
+    {% btn size="sm" %}{% icon "heart" "size-4" %}Guardar{% endbtn %}
+    {% btn variant="secondary" size="sm" %}{% icon "map-pin" "size-4" %}Maps{% endbtn %}
+  </div>
+{% endcard %}

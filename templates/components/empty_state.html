@@ -1,0 +1,7 @@
+{% comment %}Estado vacío. Uso: {% include "components/empty_state.html" with icon="heart" title="Sin favoritas" text="..." cta_label="Explorar" cta_href="/" %}{% endcomment %}
+{% load ui %}<div class="empty-state">
+  <span class="flex size-14 items-center justify-center rounded-full bg-primary text-action-fill">{% icon icon|default:"sparkles" "size-7" %}</span>
+  <h2 class="text-lg font-bold">{{ title }}</h2>
+  {% if text %}<p class="max-w-xs text-sm text-muted">{{ text }}</p>{% endif %}
+  {% if cta_label %}{% btn href=cta_href size="md" %}{{ cta_label }}{% endbtn %}{% endif %}
+</div>

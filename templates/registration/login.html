@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<div class="flex min-h-[calc(100dvh-3rem)] flex-col justify-center gap-6">
+  <header class="flex flex-col items-center gap-3 text-center">
+    <span class="flex size-16 items-center justify-center rounded-2xl bg-action-fill text-white shadow-soft">{% icon "door-open" "size-8" %}</span>
+    <div>
+      <h1 class="text-2xl font-extrabold tracking-tight">Picaporte</h1>
+      <p class="text-sm text-muted">Empresas de Barcelona donde llamar a la puerta.</p>
+    </div>
+  </header>
+
+  {% card %}
+    <form method="post" action="{% url 'login' %}" class="space-y-4" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="flex items-start gap-2 rounded-2xl bg-danger px-4 py-3 text-sm text-danger-ink" role="alert">
+          {% icon "circle-alert" "mt-0.5 size-4 shrink-0" %}
+          <span>{{ form.non_field_errors.0 }}</span>
+        </div>
+      {% endif %}
+      {% include "components/field.html" with field=form.username %}
+      {% include "components/field.html" with field=form.password %}
+      <input type="hidden" name="next" value="{{ next }}">
+      {% btn type="submit" size="lg" %}{% icon "lock" "size-5" %}Entrar{% endbtn %}
+    </form>
+  {% endcard %}
+
+  <p class="text-center text-xs text-muted">Aplicación personal · un solo usuario</p>
+</div>
+{% endblock %}

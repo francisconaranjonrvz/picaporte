@@ -1,0 +1,46 @@
+name: DB (migraciones en Neon)
+
+# Se ejecuta tras un CI verde en main (o a mano). Usa la URL DIRECTA de Neon
+# (sin -pooler): las migraciones no deben pasar por PgBouncer.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Mismo grupo que usarán los workers de descubrimiento/enriquecimiento (fase 3).
+concurrency:
+  group: neon-prod-db
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: migrate + ensure_user
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ALLOWED_HOSTS: localhost
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - name: Migrar
+        run: uv run python manage.py migrate --noinput
+      - name: Asegurar el usuario único
+        run: uv run python manage.py ensure_user
+        env:
+          PICAPORTE_USER: ${{ secrets.PICAPORTE_USER }}
+          PICAPORTE_PASSWORD: ${{ secrets.PICAPORTE_PASSWORD }}
+          PICAPORTE_EMAIL: ${{ secrets.PICAPORTE_EMAIL }}

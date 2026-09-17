@@ -1,0 +1,5 @@
+# Normalizar finales de línea: el CSS compilado y ruff format exigen LF.
+* text=auto eol=lf
+*.png binary
+*.woff2 binary
+*.ico binary

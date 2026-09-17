@@ -1,0 +1,7 @@
+{% comment %}Campo de formulario Django. Uso: {% include "components/field.html" with field=form.username %}{% endcomment %}
+<div class="field">
+  <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<p class="field-help">{{ field.help_text }}</p>{% endif %}
+  {% for error in field.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+</div>

@@ -1,0 +1,5 @@
+{% comment %}Chip de filtro (toggle). Uso: {% include "components/chip.html" with label="Eixample" pressed=True %}{% endcomment %}
+{% load ui %}<button type="button" class="chip" aria-pressed="{{ pressed|yesno:'true,false' }}"
+  x-data="{ on: {{ pressed|yesno:'true,false' }} }" x-on:click="on = !on" x-bind:aria-pressed="on">
+  {% if icon %}{% icon icon "size-4" %}{% endif %}{{ label }}
+</button>

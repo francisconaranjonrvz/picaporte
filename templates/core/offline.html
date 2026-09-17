@@ -1,0 +1,30 @@
+<!doctype html>
+{# Página autónoma (sin estáticos): la sirve el service worker cuando no hay red. #}
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sin conexión · Picaporte</title>
+  <meta name="theme-color" content="#F5F9FF">
+  <style>
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #f5f9ff; color: #1e293b;
+           font-family: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif; text-align: center; padding: 24px; }
+    .card { background: #fff; border-radius: 1rem; padding: 32px 24px; max-width: 320px;
+            box-shadow: 0 1px 2px rgb(30 41 59 / .04), 0 8px 24px -8px rgb(91 141 239 / .18); }
+    .icon { width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 999px; background: #bfd7ff; color: #3a6bd0;
+            display: grid; place-items: center; }
+    h1 { font-size: 1.25rem; margin: 0 0 8px; }
+    p { color: #64748b; font-size: .9rem; margin: 0 0 20px; }
+    button { min-height: 44px; padding: 0 20px; border: 0; border-radius: 1rem; background: #3a6bd0; color: #fff;
+             font: inherit; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></svg></div>
+    <h1>Sin conexión</h1>
+    <p>Picaporte necesita internet para cargar las empresas. Revisa la cobertura e inténtalo de nuevo.</p>
+    <button type="button" onclick="location.reload()">Reintentar</button>
+  </div>
+</body>
+</html>

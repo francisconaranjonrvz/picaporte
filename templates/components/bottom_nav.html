@@ -1,0 +1,12 @@
+{% load ui %}
+{% with current=request.resolver_match.url_name %}
+<nav class="tabbar" aria-label="Navegación principal">
+  <ul class="mx-auto flex max-w-lg">
+    <li class="flex flex-1"><a class="tab" href="{% url 'explorar' %}" {% if current == 'explorar' %}aria-current="page"{% endif %}><span class="tab-icon">{% icon "compass" "size-6" %}</span>Explorar</a></li>
+    <li class="flex flex-1"><a class="tab" href="{% url 'mapa' %}" {% if current == 'mapa' %}aria-current="page"{% endif %}><span class="tab-icon">{% icon "map" "size-6" %}</span>Mapa</a></li>
+    <li class="flex flex-1"><a class="tab" href="{% url 'favoritas' %}" {% if current == 'favoritas' %}aria-current="page"{% endif %}><span class="tab-icon">{% icon "heart" "size-6" %}</span>Favoritas</a></li>
+    <li class="flex flex-1"><a class="tab" href="{% url 'ruta' %}" {% if current == 'ruta' %}aria-current="page"{% endif %}><span class="tab-icon">{% icon "route" "size-6" %}</span>Ruta</a></li>
+    <li class="flex flex-1"><a class="tab" href="{% url 'perfil' %}" {% if current == 'perfil' %}aria-current="page"{% endif %}><span class="tab-icon">{% icon "user" "size-6" %}</span>Perfil</a></li>
+  </ul>
+</nav>
+{% endwith %}
