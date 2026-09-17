@@ -17,10 +17,14 @@ if not SECRET_KEY:
     raise ImproperlyConfigured("SECRET_KEY vacía: define el secreto en Vercel / GitHub.")
 
 # Neon: en Vercel la URL *-pooler* (PgBouncer, modo transacción); en Actions la directa.
-DATABASES = {"default": env.db("DATABASE_URL")}
+_db_url = env("DATABASE_URL", default="").strip().strip("'\"")
+DATABASES = {"default": env.db_url_config(_db_url) if _db_url else {}}
 if not DATABASES["default"]:
+    # Diagnóstico sin revelar credenciales: solo longitud y esquema.
+    _scheme = _db_url.split("://", 1)[0] if "://" in _db_url else "(sin esquema)"
     raise ImproperlyConfigured(
-        "DATABASE_URL vacía o inválida: usa la URL pooled (Vercel) o directa (Actions)."
+        f"DATABASE_URL vacía o inválida (longitud {len(_db_url)}, esquema {_scheme!r}): "
+        "pega la URL completa postgresql://... de Neon (pooled en Vercel, directa en Actions)."
     )
 if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
     DATABASES["default"].update(
