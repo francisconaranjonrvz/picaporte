@@ -21,8 +21,12 @@ from .base import RawCompany, SourceError
 logger = logging.getLogger(__name__)
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-FALLBACK_URLS = ("https://overpass.private.coffee/api/interpreter",)
-RETRY_PAUSE_SECONDS = 30  # política de overpass-api.de tras un 429/504
+FALLBACK_URLS = (
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
+PRIMARY_ATTEMPTS = 3
+RETRY_PAUSE_SECONDS = 30  # política de overpass-api.de tras un 429/504; crece con cada intento
 # bbox del municipio de Barcelona (sur, oeste, norte, este); la zona se asigna luego por bbox fino.
 BARCELONA_BBOX = "41.32,2.05,41.47,2.23"
 
@@ -61,7 +65,7 @@ def build_query(bbox: str = BARCELONA_BBOX) -> str:
     clauses.append('  nwr["amenity"="coworking_space"];')
     clauses += [f'  nwr["amenity"="studio"]["studio"="{v}"];' for v in STUDIO_TO_CATEGORY]
     body = "\n".join(clauses)
-    return f"[out:json][timeout:90][bbox:{bbox}];\n(\n{body}\n);\nout center;"
+    return f"[out:json][timeout:180][bbox:{bbox}];\n(\n{body}\n);\nout center;"
 
 
 QUERY = build_query()
@@ -118,12 +122,17 @@ class OverpassAdapter:
         self.ttl = ttl
 
     def _request(self):
-        """Endpoint principal con un reintento tras pausa; si sigue saturado, los espejos."""
+        """Varios intentos en el principal con pausas crecientes; si sigue saturado, los espejos.
+
+        Desde los runners de GitHub (IPs compartidas) los 504 son frecuentes; el cron
+        semanal tolera esperar unos minutos.
+        """
         last_error = ""
-        for url in (self.url, self.url, *FALLBACK_URLS):
+        urls = [self.url] * PRIMARY_ATTEMPTS + list(FALLBACK_URLS)
+        for attempt, url in enumerate(urls, start=1):
             try:
                 response = fetch(
-                    url, method="POST", data={"data": QUERY}, ttl=self.ttl, timeout=120
+                    url, method="POST", data={"data": QUERY}, ttl=self.ttl, timeout=200
                 )
             except FetchError as exc:
                 last_error = str(exc)
@@ -133,9 +142,10 @@ class OverpassAdapter:
             if response.status_code == 406:
                 raise SourceError("Overpass ha bloqueado el User-Agent (406).")
             last_error = f"Overpass {url} respondió {response.status_code}"
-            if response.status_code in (429, 504):
-                logger.warning("%s; pausa de %ss", last_error, RETRY_PAUSE_SECONDS)
-                time.sleep(RETRY_PAUSE_SECONDS)
+            if response.status_code in (429, 504) and attempt < len(urls):
+                pause = RETRY_PAUSE_SECONDS * min(attempt, 3)
+                logger.warning("%s; pausa de %ss", last_error, pause)
+                time.sleep(pause)
         raise SourceError(f"Overpass saturado o caído: {last_error}")
 
     def fetch(self) -> Iterable[RawCompany]:

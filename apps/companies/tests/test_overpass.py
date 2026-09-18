@@ -40,7 +40,7 @@ UNNAMED = {"type": "node", "id": 8, "lat": 41.4, "lon": 2.2, "tags": {"office": 
 
 
 def test_la_consulta_usa_filtros_exactos_bbox_y_centros():
-    assert QUERY.startswith("[out:json][timeout:90][bbox:41.32,2.05,41.47,2.23];")
+    assert QUERY.startswith("[out:json][timeout:180][bbox:41.32,2.05,41.47,2.23];")
     assert 'nwr["office"="advertising_agency"];' in QUERY
     assert 'nwr["amenity"="studio"]["studio"="video"];' in QUERY
     assert "~" not in QUERY  # sin regex: los índices de Overpass no los usan
@@ -109,7 +109,7 @@ def test_fetch_devuelve_rawcompanies(monkeypatch):
 
 def test_reintenta_tras_504_y_luego_usa_el_espejo(monkeypatch):
     calls = []
-    outcomes = [Fetched(504, "", False), Fetched(504, "", False), Fetched(200, _body(NODE), False)]
+    outcomes = [Fetched(504, "", False)] * 3 + [Fetched(200, _body(NODE), False)]
 
     def fake_fetch(url, **kwargs):
         calls.append(url)
@@ -125,7 +125,9 @@ def test_reintenta_tras_504_y_luego_usa_el_espejo(monkeypatch):
         overpass.OVERPASS_URL,
         "sleep 30",
         overpass.OVERPASS_URL,
-        "sleep 30",
+        "sleep 60",
+        overpass.OVERPASS_URL,
+        "sleep 90",
         overpass.FALLBACK_URLS[0],
     ]
 
