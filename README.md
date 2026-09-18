@@ -13,7 +13,7 @@ hosting **0 €**.
 | Estado | Fase |
 |--------|------|
 | ✅ Hecha | **1 · Esqueleto**: Django 5.2, settings por entorno, Neon, Vercel, `/health`, login, CI, design system y `/styleguide`, PWA |
-| ✅ Hecha | **2 · Perfil**: CV en PDF guardado en Neon (≤ 4 MB), parseo con Claude Haiku (PDF directo + structured outputs, caché por hash), perfil editable y preferencias (categorías, zonas, tamaño, idiomas, intereses) |
+| ✅ Hecha | **2 · Perfil**: CV en PDF guardado en Neon (≤ 4 MB), parseo con un LLM gratuito (NVIDIA, JSON guiado + Pydantic, caché por hash; Claude opcional), perfil editable y preferencias (categorías, zonas, tamaño, idiomas, intereses) |
 | ⏳ Pendiente | 3 · Descubrimiento multi-fuente (Google Places, Overpass, Foursquare OS Places, directorios) con deduplicación |
 | ⏳ Pendiente | 4 · Enriquecimiento (fetch web + Claude Haiku + Pydantic) y `fit_score` |
 | ⏳ Pendiente | 5 · UI principal: Explorar, Mapa, ficha, Favoritas, tracker |
@@ -48,7 +48,7 @@ flowchart LR
         OSM["Overpass (OSM)"]
         FSQ["Foursquare OS Places"]
         DIR["Directorios sectoriales"]
-        ANT["Anthropic API (Haiku)"]
+        LLM["LLM: NVIDIA (gratis) / Anthropic (opcional)"]
     end
 
     UI -- HTTPS --> DJ
@@ -57,7 +57,8 @@ flowchart LR
     DJ -- "workflow_dispatch (botón Buscar)" --> W
     DBW -- "URL directa" --> DB
     W -- "URL directa" --> DB
-    W --> GP & OSM & FSQ & DIR & ANT
+    W --> GP & OSM & FSQ & DIR & LLM
+    DJ -- "parseo del CV" --> LLM
     CI -. "verde en main" .-> DBW
 ```
 
@@ -78,7 +79,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
-| [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | Parseo del CV con Haiku **en la request** (excepción acotada: una llamada, 60 s) y **caché de llamadas LLM** por hash con contabilidad de coste |
+| [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | **LLM gratuito** (NVIDIA, OpenAI-compatible) con proveedores intercambiables; parseo del CV **en la request** (excepción acotada: una llamada, 60 s) y **caché de llamadas** por hash con contabilidad de coste |
 
 ### Estructura del repositorio
 
@@ -87,7 +88,7 @@ config/            settings/{base,local,production,test}.py · urls · wsgi · l
 apps/core/         health, pestañas, styleguide, PWA, design.py (tokens + contraste), templatetags/ui.py
 apps/accounts/     login/logout, management/commands/ensure_user.py
 apps/catalog/      Category y Zone configurables en BD (sembradas por migración)
-apps/llm/          cliente Anthropic (structured outputs), LLMCall (caché por hash + tokens + coste), prompts versionados
+apps/llm/          capa común (caché por hash, LLMCall con tokens y coste) + providers/ (nvidia gratuito, anthropic opcional)
 apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y parseo, formulario móvil
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
@@ -107,8 +108,10 @@ mantiene transversal.
 
 1. El PDF (≤ 4 MB por el límite de body de Vercel) se valida por cabecera `%PDF-` y se guarda
    en Neon como `bytea` (`CVDocument`); solo se conserva el actual.
-2. "Analizar con IA" envía el PDF **tal cual** a Claude Haiku 4.5 como documento y pide la
-   salida con *structured outputs* validada por Pydantic (`ParsedCV`). El prompt vive en
+2. "Analizar con IA" extrae el texto del PDF (`pypdf`) y lo envía al LLM gratuito de NVIDIA
+   (`meta/llama-3.3-70b-instruct`, API OpenAI-compatible) pidiendo JSON guiado por el esquema
+   de `ParsedCV` (Pydantic); si no valida, se pide una corrección. Con `LLM_PROVIDER=anthropic`
+   el PDF viaja como documento a Claude Haiku con *structured outputs*. El prompt vive en
    [`prompts/cv_parse_v1.md`](prompts/cv_parse_v1.md).
 3. Cada llamada queda en `LLMCall` con su hash de entrada, tokens y coste: repetir el análisis
    del mismo CV con el mismo prompt no llama a la API.
@@ -169,7 +172,7 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
    | `DJANGO_SETTINGS_MODULE` | `config.settings.production` |
    | `SECRET_KEY` | 50+ caracteres aleatorios |
    | `DATABASE_URL` | URL **pooled** de Neon (`?sslmode=require`) |
-   | `ANTHROPIC_API_KEY` | clave de la Anthropic API (fase 2: parseo del CV) |
+   | `NVIDIA_API_KEY` | clave `nvapi-…` gratuita de [build.nvidia.com](https://build.nvidia.com) (parseo del CV) |
 
    Comprueba que *Expose System Environment Variables* está activo (así `ALLOWED_HOSTS` y
    `CSRF_TRUSTED_ORIGINS` se derivan de `VERCEL_URL`). La región de la función (`fra1`) la fija
@@ -198,7 +201,8 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
 | `ALLOWED_HOSTS` / `CSRF_TRUSTED_ORIGINS` | — | opcional (dominio propio) | — |
 | `PICAPORTE_USER` / `PICAPORTE_PASSWORD` / `PICAPORTE_EMAIL` | ✅ | — | ✅ |
 | `TEST_DATABASE_URL` | opcional | — | CI (Postgres 17) |
-| `ANTHROPIC_API_KEY` (+ `LLM_MODEL`, `LLM_TIMEOUT` opcionales) | opcional | ✅ | fase 4 |
+| `NVIDIA_API_KEY` (+ `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT` opcionales) | opcional | ✅ | fase 4 |
+| `ANTHROPIC_API_KEY` (solo con `LLM_PROVIDER=anthropic`) | opcional | opcional | opcional |
 | `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY`, `GITHUB_TOKEN` | fases 3-4 | fase 3 (`GITHUB_TOKEN`) | fases 3-4 |
 
 ### CI
@@ -219,9 +223,9 @@ tras un CI verde en `main`.
 | Foursquare OS Places | — | dataset abierto | 0 € |
 | Directorios sectoriales (scraping) | — | gratis | 0 € |
 | Fetch de webs (≤ 5 páginas/dominio) | ≤ 500 | gratis | 0 € |
-| Claude Haiku · parseo del CV (una vez por CV) | 1 | ~5 k tokens entrada + ~1 k salida · 1 $/5 $ por M tokens | ~0,01 $ (0 $ si se repite: caché) |
-| Claude Haiku · extracción | se completa en fase 4 | | |
-| Claude Haiku · scoring | se completa en fase 4 | | |
+| LLM · parseo del CV (una vez por CV) | 1-2 | NVIDIA gratuito (Claude Haiku opcional: ~0,01 $) | **0 €** |
+| LLM · extracción | se completa en fase 4 | NVIDIA gratuito | 0 € |
+| LLM · scoring | se completa en fase 4 | NVIDIA gratuito | 0 € |
 | **Hosting** (Vercel Hobby + Neon Free + Actions) | | | **0 €** |
 
 Toda respuesta se cachea en la base de datos (`LLMCall` guarda hash, tokens y coste real de cada

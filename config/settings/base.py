@@ -111,7 +111,11 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 FILE_UPLOAD_HANDLERS = ["django.core.files.uploadhandler.MemoryFileUploadHandler"]
 
-# Anthropic API (fase 2: parseo del CV; fase 4: enriquecimiento y scoring).
+# IA (fase 2: parseo del CV; fase 4: enriquecimiento y scoring).
+# Proveedor por defecto: NVIDIA (build.nvidia.com, gratuito, API OpenAI-compatible).
+# Alternativa de pago: LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY.
+LLM_PROVIDER = env("LLM_PROVIDER", default="nvidia")
+NVIDIA_API_KEY = env("NVIDIA_API_KEY", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
-LLM_MODEL = env("LLM_MODEL", default="claude-haiku-4-5")
+LLM_MODEL = env("LLM_MODEL", default="")  # vacío = modelo por defecto del proveedor
 LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=45)

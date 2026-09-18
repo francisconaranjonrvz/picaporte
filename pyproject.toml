@@ -12,6 +12,8 @@ dependencies = [
   "whitenoise>=6.12,<7",
   "django-htmx>=1.29,<2",
   "anthropic>=1,<2",
+  "openai>=1.60,<3",
+  "pypdf>=5,<7",
 ]
 
 [dependency-groups]

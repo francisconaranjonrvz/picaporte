@@ -1,34 +1,44 @@
-# ADR 0008 · Parseo del CV con Haiku dentro de la request y caché de llamadas LLM
+# ADR 0008 · Parseo del CV con un LLM gratuito dentro de la request, y caché de llamadas
 
-**Estado:** aceptada · 2026-09-17
+**Estado:** aceptada · 2026-09-17 (proveedor gratuito desde 2026-09-18)
 
 ## Contexto
 El ADR 0007 prohíbe trabajo largo dentro de una request de Vercel, pensando en el
 descubrimiento y el enriquecimiento (minutos, cientos de llamadas). El parseo del CV es una
-única llamada a Claude Haiku 4.5 con un PDF de 1-3 páginas (5-10 s), la lanza la usuaria a
-mano y espera el resultado en pantalla.
+única llamada a un LLM con un CV de 1-3 páginas (5-15 s), la lanza la usuaria a mano y espera
+el resultado en pantalla. El proyecto debe costar 0 €, así que el proveedor por defecto es la
+API gratuita de NVIDIA (build.nvidia.com), OpenAI-compatible.
 
 ## Decisión
+- **Proveedores intercambiables** (`apps/llm/providers/`, `LLM_PROVIDER`): `nvidia` por
+  defecto (gratuito, `meta/llama-3.3-70b-instruct`) y `anthropic` opcional (de pago, Claude
+  Haiku 4.5). La capa común (`apps/llm/client.py`) hace caché y contabilidad; cada proveedor
+  solo implementa `complete()`.
 - El parseo se ejecuta **en la request** (HTMX + skeleton). `vercel.json` sube `maxDuration`
-  a 60 s; el cliente Anthropic tiene `timeout` de 45 s y **sin reintentos** (un reintento no
-  cabría en la ventana). Es la única
-  excepción acotada al ADR 0007: una llamada, modelo rápido, iniciada por la usuaria.
-- El PDF se envía **directamente** a la API como documento (`document` base64): no se extrae
-  texto en Python, así el modelo ve la maquetación (columnas, iconos, tablas).
-- La salida se valida con **structured outputs** (`client.messages.parse` + Pydantic
-  `ParsedCV`): el JSON llega con la forma exacta o la llamada falla de forma controlada.
-- **Caché en BD** (`apps.llm.LLMCall`): cada llamada se guarda con `sha256(modelo + versión
-  del prompt + system + texto + esquema de salida + PDF)`. Repetir el análisis del mismo CV con el mismo prompt no
-  cuesta nada; cambiar el prompt (`prompts/cv_parse_v2.md`) o el esquema Pydantic invalida la
-  caché de forma natural.
-  Tokens y coste estimado quedan registrados para la tabla de costes del README.
+  a 60 s; el cliente tiene `timeout` de 45 s y **sin reintentos** (un reintento no cabría en
+  la ventana). Es la única excepción acotada al ADR 0007: una llamada, iniciada por la usuaria.
+- **NVIDIA no acepta PDF**: el texto se extrae con `pypdf` (si el PDF es un escaneo sin texto,
+  se avisa) y va en el mensaje. La salida se pide con `nvext.guided_json` (lo que NVIDIA
+  recomienda frente a `response_format=json_object`), con el esquema JSON también en el prompt;
+  si el JSON no valida con Pydantic se pide **una** corrección al modelo. Con Anthropic el PDF
+  viaja como documento y la validación la hace el SDK (structured outputs).
+- **Caché en BD** (`apps.llm.LLMCall`): cada llamada se guarda con `sha256(proveedor + modelo +
+  versión del prompt + system + texto + esquema de salida + PDF)`. Repetir el análisis del
+  mismo CV con el mismo prompt no cuesta nada; cambiar el prompt (`prompts/cv_parse_v2.md`), el
+  esquema Pydantic o el proveedor invalida la caché de forma natural. Tokens y coste estimado
+  (0 con NVIDIA) quedan registrados para la tabla de costes del README.
 - Los prompts viven en `prompts/*_vN.md`; el perfil guarda `parsed_prompt_version` y
   `parsed_model`.
 - El parseo **no pisa** lo editado a mano: solo rellena campos vacíos salvo que la usuaria
   marque "Sobrescribir".
 
 ## Consecuencias
-- Necesita `ANTHROPIC_API_KEY` en Vercel; sin ella la UI lo dice y el resto de la app funciona.
-- Un CV de 2 páginas cuesta ~0,005-0,01 USD; el segundo análisis, 0.
+- Necesita `NVIDIA_API_KEY` en Vercel (o `ANTHROPIC_API_KEY` con `LLM_PROVIDER=anthropic`);
+  sin clave la UI lo dice y el resto de la app funciona.
+- Coste 0 € con NVIDIA (límite de ~40 peticiones/minuto en el nivel gratuito, de sobra para
+  un solo uso). Con Anthropic, ~0,01 USD por CV.
+- Un modelo abierto de 70B extrae peor que Claude en CVs con maquetación compleja; la
+  extracción de texto pierde el orden de las columnas. La usuaria siempre puede corregir a
+  mano, y el proveedor se cambia con una variable de entorno.
 - Si en el futuro el parseo creciera (varios documentos, modelos más lentos), pasaría a
   GitHub Actions como el resto de trabajos.
