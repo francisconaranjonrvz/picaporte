@@ -109,7 +109,7 @@ mantiene transversal.
 1. El PDF (≤ 4 MB por el límite de body de Vercel) se valida por cabecera `%PDF-` y se guarda
    en Neon como `bytea` (`CVDocument`); solo se conserva el actual.
 2. "Analizar con IA" extrae el texto del PDF (`pypdf`) y lo envía al LLM gratuito de NVIDIA
-   (`openai/gpt-oss-20b`, API OpenAI-compatible) pidiendo JSON según el esquema
+   (`google/gemma-4-31b-it`, API OpenAI-compatible) pidiendo JSON según el esquema
    de `ParsedCV` (Pydantic); si no valida, se pide una corrección. Con `LLM_PROVIDER=anthropic`
    el PDF viaja como documento a Claude Haiku con *structured outputs*. El prompt vive en
    [`prompts/cv_parse_v1.md`](prompts/cv_parse_v1.md).

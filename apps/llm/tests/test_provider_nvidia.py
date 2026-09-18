@@ -199,8 +199,8 @@ def test_client_real_apunta_a_nvidia_sin_reintentos(settings):
     assert str(client.base_url).rstrip("/") == BASE_URL
     assert client.max_retries == 0
     assert client.timeout == 45
-    assert NvidiaProvider().price_per_mtok("openai/gpt-oss-20b") == (0, 0)
-    assert NvidiaProvider().default_model == "openai/gpt-oss-20b"
+    assert NvidiaProvider().price_per_mtok("google/gemma-4-31b-it") == (0, 0)
+    assert NvidiaProvider().default_model == "google/gemma-4-31b-it"
 
 
 def test_el_esquema_del_prompt_es_json_valido(provider):

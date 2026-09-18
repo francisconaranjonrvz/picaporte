@@ -6,9 +6,10 @@
   endpoint alojado rechaza `nvext.guided_json`; si un modelo tampoco admite
   `response_format`, se reintenta sin él) + validación Pydantic con un intento
   de reparación si el JSON no valida.
-- Modelo por defecto `openai/gpt-oss-20b`: en el nivel gratuito es el más rápido
-  (16-26 s por CV) con extracción correcta; `google/gemma-4-31b-it` extrae igual
-  de bien pero tarda de 18 a 70 s. Los modelos "de razonamiento" se pasan pensando.
+- Modelo por defecto `google/gemma-4-31b-it`: en un benchmark con CV difícil
+  (catalán, siglas, secciones desordenadas) acertó el 100 % de los campos en
+  ~30 s; `openai/gpt-oss-20b` es la alternativa (76-88 %, 16-90 s). Los modelos
+  "de razonamiento" se pasan pensando y agotan el tiempo.
 """
 
 import io
@@ -51,7 +52,7 @@ def extract_pdf_text(data: bytes) -> str:
 
 class NvidiaProvider:
     name = "nvidia"
-    default_model = "openai/gpt-oss-20b"
+    default_model = "google/gemma-4-31b-it"
 
     def price_per_mtok(self, model: str) -> tuple[Decimal, Decimal]:
         return (Decimal(0), Decimal(0))  # nivel gratuito de build.nvidia.com

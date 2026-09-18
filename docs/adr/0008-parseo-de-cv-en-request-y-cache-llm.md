@@ -11,7 +11,7 @@ API gratuita de NVIDIA (build.nvidia.com), OpenAI-compatible.
 
 ## Decisión
 - **Proveedores intercambiables** (`apps/llm/providers/`, `LLM_PROVIDER`): `nvidia` por
-  defecto (gratuito, `openai/gpt-oss-20b`) y `anthropic` opcional (de pago, Claude
+  defecto (gratuito, `google/gemma-4-31b-it`) y `anthropic` opcional (de pago, Claude
   Haiku 4.5). La capa común (`apps/llm/client.py`) hace caché y contabilidad; cada proveedor
   solo implementa `complete()`.
 - El parseo se ejecuta **en la request** (HTMX + skeleton). `vercel.json` sube `maxDuration`
@@ -23,9 +23,12 @@ API gratuita de NVIDIA (build.nvidia.com), OpenAI-compatible.
   se avisa) y va en el mensaje. La salida se pide con el esquema JSON en el prompt y
   `response_format=json_object` (el endpoint alojado rechaza el `nvext.guided_json` que
   recomienda la documentación de NIM); si el JSON no valida con Pydantic se pide **una**
-  corrección al modelo. Elección del modelo tras probar los disponibles con un CV real:
-  `openai/gpt-oss-20b` (16-26 s, extracción correcta) por defecto; `google/gemma-4-31b-it`
-  extrae igual de bien pero tarda 18-70 s; los modelos de razonamiento agotan el tiempo. Con Anthropic el PDF
+  corrección al modelo. Elección del modelo tras un benchmark con dos CVs (uno con catalán,
+  siglas y secciones desordenadas, puntuado contra una respuesta esperada):
+  `google/gemma-4-31b-it` 100/100 en ambas pasadas (~30 s) → por defecto;
+  `openai/gpt-oss-20b` 76-88/100 y 16-90 s → alternativa; los modelos de razonamiento
+  (GLM 5.3, Nemotron 3 Super, DeepSeek flash) agotan el tiempo o se cortan; varios modelos
+  listados por la API no existen para la cuenta (404) y `meta/llama-3.3-70b` está retirado. Con Anthropic el PDF
   viaja como documento y la validación la hace el SDK (structured outputs).
 - **Caché en BD** (`apps.llm.LLMCall`): cada llamada se guarda con `sha256(proveedor + modelo +
   versión del prompt + system + texto + esquema de salida + PDF)`. Repetir el análisis del
