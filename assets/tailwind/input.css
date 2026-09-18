@@ -114,6 +114,17 @@
   .skeleton {
     @apply animate-pulse rounded-xl bg-primary/60;
   }
+  /* Con hx-indicator sobre el contenedor: skeleton visible y contenido atenuado mientras la petición vuela */
+  .htmx-indicator {
+    display: none;
+  }
+  .htmx-request .htmx-indicator,
+  .htmx-request.htmx-indicator {
+    display: block;
+  }
+  .htmx-request .htmx-content {
+    @apply pointer-events-none opacity-40;
+  }
 
   /* Barra de navegación inferior (fija, respeta el notch) */
   .tabbar {

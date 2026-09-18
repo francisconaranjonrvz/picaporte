@@ -31,9 +31,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.forms",  # necesario para FORM_RENDERER = TemplatesSetting
     "django_htmx",
     "apps.core",
     "apps.accounts",
+    "apps.catalog",
+    "apps.llm",
+    "apps.profiles",
 ]
 
 MIDDLEWARE = [
@@ -51,6 +55,8 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
+# Los widgets propios (chips) viven en templates/; el renderer por defecto solo mira dentro de las apps.
+FORM_RENDERER = "django.forms.renderers.TemplatesSetting"
 WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
@@ -99,3 +105,13 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Subidas: el CV (<= 4 MB) se procesa en memoria; nunca se escribe en disco (FS de solo lectura en Vercel).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+FILE_UPLOAD_HANDLERS = ["django.core.files.uploadhandler.MemoryFileUploadHandler"]
+
+# Anthropic API (fase 2: parseo del CV; fase 4: enriquecimiento y scoring).
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+LLM_MODEL = env("LLM_MODEL", default="claude-haiku-4-5")
+LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=45)

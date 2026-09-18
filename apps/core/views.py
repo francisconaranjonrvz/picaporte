@@ -74,10 +74,6 @@ def ruta(request):
     return _placeholder(request, "ruta")
 
 
-def perfil(request):
-    return render(request, "core/perfil.html", {"title": "Perfil"})
-
-
 @login_not_required
 def styleguide(request):
     """Catálogo vivo del design system (público: no expone datos)."""

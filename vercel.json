@@ -3,8 +3,8 @@
   "regions": ["fra1"],
   "functions": {
     "config/wsgi.py": {
-      "maxDuration": 15,
-      "excludeFiles": "{**/tests/**,docs/**,.github/**,assets/**,scripts/**,.tools/**,prompts/**,db.sqlite3,conftest.py}"
+      "maxDuration": 60,
+      "excludeFiles": "{**/tests/**,docs/**,.github/**,assets/**,scripts/**,.tools/**,db.sqlite3,conftest.py}"
     }
   }
 }

@@ -34,6 +34,11 @@
     document.addEventListener("htmx:sendError", () => {
       window.dispatchEvent(new CustomEvent("toast", { detail: "Sin conexión. Inténtalo de nuevo." }));
     });
+    document.addEventListener("htmx:responseError", (event) => {
+      const status = event.detail.xhr?.status;
+      const text = status === 504 ? "El servidor ha tardado demasiado. Vuelve a intentarlo." : `Error del servidor (${status}).`;
+      window.dispatchEvent(new CustomEvent("toast", { detail: text }));
+    });
   </script>
   <script defer src="{% static 'vendor/alpine.min.js' %}"></script>
   {% block head %}{% endblock %}
@@ -49,7 +54,7 @@
 
   <div id="toasts"
        class="pointer-events-none fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-50 flex flex-col gap-2"
-       x-data="toasts" @toast.window="add($event.detail)" role="status" aria-live="polite">
+       x-data="toasts" @toast.window="add(typeof $event.detail === 'string' ? $event.detail : ($event.detail.value || ''))" role="status" aria-live="polite">
     {% for message in messages %}<span hidden data-toast="{{ message }}"></span>{% endfor %}
     <template x-for="t in items" :key="t.id">
       <div class="toast" x-transition.duration.200ms x-text="t.text"></div>

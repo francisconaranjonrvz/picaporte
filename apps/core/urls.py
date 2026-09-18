@@ -8,7 +8,6 @@ urlpatterns = [
     path("mapa/", views.mapa, name="mapa"),
     path("favoritas/", views.favoritas, name="favoritas"),
     path("ruta/", views.ruta, name="ruta"),
-    path("perfil/", views.perfil, name="perfil"),
     path("styleguide", views.styleguide, name="styleguide"),
     path("styleguide/demo", views.styleguide_demo, name="styleguide_demo"),
     # PWA: servidos por Django para que el scope del service worker sea "/".

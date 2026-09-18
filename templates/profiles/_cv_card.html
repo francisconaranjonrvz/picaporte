@@ -1,0 +1,39 @@
+{% load ui %}
+{% card %}
+  <div class="flex items-start gap-3">
+    <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-action-fill">{% icon "file-text" "size-5" %}</span>
+    <div class="min-w-0 flex-1">
+      <h2 class="font-bold">Currículum</h2>
+      {% if cv %}
+        <p class="truncate text-sm text-muted"><a class="text-action-fill underline-offset-2 hover:underline" href="{% url 'cv_download' %}" target="_blank" rel="noopener">{{ cv.filename }}</a> · {{ cv.size_label }} · {{ cv.uploaded_at|date:"j M Y" }}</p>
+      {% else %}
+        <p class="text-sm text-muted">Sube tu CV en PDF (máx. {{ max_cv_mb }} MB). Se guarda en la base de datos y nunca se envía a ninguna empresa.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="post" action="{% url 'cv_upload' %}" enctype="multipart/form-data" class="mt-3" x-data="{ name: '' }">
+    {% csrf_token %}
+    <label class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-action px-4 text-sm font-semibold text-action-fill transition duration-150 active:scale-[0.98]">
+      {% icon "upload" "size-5" %}
+      <span x-text="name || '{% if cv %}Sustituir el PDF{% else %}Elegir PDF{% endif %}'"></span>
+      <input type="file" name="cv" accept="application/pdf,.pdf" class="sr-only" required x-on:change="name = $event.target.files[0]?.name || ''; if (name) $el.form.requestSubmit()">
+    </label>
+  </form>
+
+  {% if cv %}
+  <div class="mt-3 flex gap-2">
+    <form hx-post="{% url 'cv_parse' %}" hx-target="#profile-form" hx-swap="innerHTML" hx-indicator="#profile-form" class="flex-1">
+      {% csrf_token %}
+      {% if profile.has_parsed_data %}
+      <label class="mb-2 flex items-center gap-2 text-xs text-muted"><input type="checkbox" name="overwrite" value="1" class="size-4 rounded border-primary accent-action-fill">Sobrescribir lo que ya hay</label>
+      {% endif %}
+      {% btn type="submit" size="md" cls="w-full" %}{% icon "sparkles" "size-5" %}Analizar con IA{% endbtn %}
+    </form>
+    <form method="post" action="{% url 'cv_delete' %}" onsubmit="return confirm('¿Eliminar el CV guardado?')" class="self-end">
+      {% csrf_token %}
+      {% btn type="submit" variant="ghost" size="md" aria_label="Eliminar CV" %}{% icon "x" "size-5" %}{% endbtn %}
+    </form>
+  </div>
+  {% endif %}
+{% endcard %}
