@@ -1,0 +1,51 @@
+name: Descubrimiento de empresas
+
+# Corre cada lunes de madrugada y a demanda (botón "Buscar nuevas empresas" en la app,
+# que pasa el id del JobRun para que el comando lo continúe).
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+      timezone: Europe/Madrid
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Id del JobRun creado por la app (vacío si se lanza a mano)"
+        required: false
+        default: ""
+      sources:
+        description: "Fuentes separadas por comas (vacío = todas)"
+        required: false
+        default: ""
+
+run-name: "discover ${{ inputs.sources || 'all' }} [job ${{ inputs.job_id || 'cron' }}]"
+
+permissions:
+  contents: read
+
+# Mismo grupo que las migraciones: nunca dos procesos escribiendo a la vez en Neon.
+concurrency:
+  group: neon-prod-db
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ALLOWED_HOSTS: localhost
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - name: Descubrir empresas
+        run: >-
+          uv run python manage.py discover
+          ${{ inputs.sources && format('--sources {0}', inputs.sources) || '' }}
+          ${{ inputs.job_id && format('--job-id {0}', inputs.job_id) || '' }}

@@ -38,6 +38,8 @@ INSTALLED_APPS = [
     "apps.catalog",
     "apps.llm",
     "apps.profiles",
+    "apps.companies",
+    "apps.jobs",
 ]
 
 MIDDLEWARE = [
@@ -119,3 +121,9 @@ NVIDIA_API_KEY = env("NVIDIA_API_KEY", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 LLM_MODEL = env("LLM_MODEL", default="")  # vacío = modelo por defecto del proveedor
 LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=90)  # el nivel gratuito de NVIDIA es lento y variable
+
+# GitHub Actions: la app lanza los workflows de descubrimiento/enriquecimiento (fase 3).
+# Token fine-grained con permiso "Actions: write" sobre el repositorio.
+GITHUB_DISPATCH_TOKEN = env("GITHUB_DISPATCH_TOKEN", default="")
+GITHUB_REPO = env("GITHUB_REPO", default="francisconaranjonrvz/picaporte")
+GITHUB_WORKFLOW_REF = env("GITHUB_WORKFLOW_REF", default="main")  # rama con los workflows

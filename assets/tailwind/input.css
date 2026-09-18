@@ -66,7 +66,7 @@
 
   /* Badges de estado (pastel + tinta AA) */
   .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold;
   }
   .badge-muted {
     @apply bg-primary/40 text-muted;

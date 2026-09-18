@@ -1,0 +1,32 @@
+{% load ui %}
+{# Estado del último descubrimiento. Se sondea cada 10 s mientras el trabajo está activo. #}
+<div id="job-status"
+     {% if job and job.is_active %}hx-get="{% url 'job_status' %}" hx-trigger="every 10s" hx-swap="outerHTML"{% endif %}>
+  {% if not job %}
+    <p class="text-sm text-muted">Todavía no se ha buscado ninguna empresa.</p>
+  {% else %}
+    <div class="flex items-start gap-3">
+      {% if job.is_active %}
+        <span class="mt-0.5 size-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-action-fill" aria-hidden="true"></span>
+      {% elif job.status == "success" %}
+        <span class="mt-0.5 text-success-ink">{% icon "check" "size-4" %}</span>
+      {% else %}
+        <span class="mt-0.5 text-danger-ink">{% icon "circle-alert" "size-4" %}</span>
+      {% endif %}
+      <div class="min-w-0 flex-1 text-sm">
+        <p class="font-semibold">
+          {% if job.status == "queued" %}En cola en GitHub Actions…
+          {% elif job.status == "running" %}Buscando empresas…
+          {% elif job.status == "success" %}Última búsqueda: {{ job.finished_at|date:"j M H:i" }}
+          {% else %}La última búsqueda falló ({{ job.finished_at|date:"j M H:i" }}){% endif %}
+        </p>
+        {% if job.summary %}<pre class="mt-1 whitespace-pre-wrap font-sans text-muted">{{ job.summary }}</pre>{% endif %}
+        {% if job.error %}<p class="mt-1 text-danger-ink">{{ job.error|truncatechars:300 }}</p>{% endif %}
+        <p class="mt-1 text-xs text-muted">
+          {{ job.get_trigger_display }}{% if job.duration_seconds is not None %} · {{ job.duration_seconds }} s{% endif %}
+          {% if job.github_run_url %} · <a class="text-action-fill underline-offset-2 hover:underline" href="{{ job.github_run_url }}" target="_blank" rel="noopener">ver en GitHub</a>{% endif %}
+        </p>
+      </div>
+    </div>
+  {% endif %}
+</div>

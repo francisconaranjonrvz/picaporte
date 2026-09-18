@@ -14,7 +14,7 @@ hosting **0 €**.
 |--------|------|
 | ✅ Hecha | **1 · Esqueleto**: Django 5.2, settings por entorno, Neon, Vercel, `/health`, login, CI, design system y `/styleguide`, PWA |
 | ✅ Hecha | **2 · Perfil**: CV en PDF guardado en Neon (≤ 4 MB), parseo con un LLM gratuito (NVIDIA, JSON guiado + Pydantic, caché por hash; Claude opcional), perfil editable y preferencias (categorías, zonas, tamaño, idiomas, intereses) |
-| ⏳ Pendiente | 3 · Descubrimiento multi-fuente (Google Places, Overpass, Foursquare OS Places, directorios) con deduplicación |
+| 🚧 En curso | **3 · Descubrimiento multi-fuente**: 3a hecha (OpenStreetMap vía Overpass, dedupe/fusión, `confidence_score`, comando `discover`, workflow semanal + botón "Buscar nuevas empresas" con estado en la UI); 3b pendiente (Foursquare OS Places y directorios sectoriales). Sin Google Places (ADR 0009) |
 | ⏳ Pendiente | 4 · Enriquecimiento (fetch web + Claude Haiku + Pydantic) y `fit_score` |
 | ⏳ Pendiente | 5 · UI principal: Explorar, Mapa, ficha, Favoritas, tracker |
 | ⏳ Pendiente | 6 · Ruta del día con Google Maps |
@@ -40,14 +40,13 @@ flowchart LR
     subgraph Actions["GitHub Actions"]
         CI["ci.yml\nlint · tests · deploy-check · css"]
         DBW["db.yml\nmigrate · ensure_user"]
-        W["discover.yml / enrich.yml (fase 3-4)\ncron semanal + workflow_dispatch"]
+        W["discover.yml (+ enrich.yml en fase 4)\ncron semanal + workflow_dispatch"]
     end
 
     subgraph Fuentes["Fuentes externas"]
-        GP["Google Places"]
         OSM["Overpass (OSM)"]
-        FSQ["Foursquare OS Places"]
-        DIR["Directorios sectoriales"]
+        FSQ["Foursquare OS Places (3b)"]
+        DIR["Directorios sectoriales (3b)"]
         LLM["LLM: NVIDIA (gratis) / Anthropic (opcional)"]
     end
 
@@ -57,7 +56,7 @@ flowchart LR
     DJ -- "workflow_dispatch (botón Buscar)" --> W
     DBW -- "URL directa" --> DB
     W -- "URL directa" --> DB
-    W --> GP & OSM & FSQ & DIR & LLM
+    W --> OSM & FSQ & DIR & LLM
     DJ -- "parseo del CV" --> LLM
     CI -. "verde en main" .-> DBW
 ```
@@ -79,6 +78,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0009](docs/adr/0009-fuentes-de-descubrimiento-y-fusion.md) | **Sin Google Places** (tarjeta obligatoria y términos que prohíben guardar datos); fuentes abiertas con adaptadores `SourceAdapter → RawCompany`, caché HTTP en BD, dedupe por dominio/nombre+distancia, `confidence_score` y trabajos en Actions lanzados desde la app |
 | [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | **LLM gratuito** (NVIDIA, OpenAI-compatible) con proveedores intercambiables; parseo del CV **en la request** (excepción acotada: una llamada, 120 s) y **caché de llamadas** por hash con contabilidad de coste |
 
 ### Estructura del repositorio
@@ -90,19 +90,33 @@ apps/accounts/     login/logout, management/commands/ensure_user.py
 apps/catalog/      Category y Zone configurables en BD (sembradas por migración)
 apps/llm/          capa común (caché por hash, LLMCall con tokens y coste) + providers/ (nvidia gratuito, anthropic opcional)
 apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y parseo, formulario móvil
+apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany; overpass.py) · dedupe.py · discover
+apps/jobs/         JobRun + cliente de la API de GitHub (dispatch del workflow y estado)
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
 static/            css/app.css (compilado) · fonts/ · vendor/alpine.min.js · icons/
 scripts/           tw.py (Tailwind standalone) · make_icons.py (PNG desde SVG)
 prompts/           prompts versionados de la Anthropic API (`cv_parse_v1.md`, …)
 docs/adr/          decisiones de arquitectura
-.github/workflows/ ci.yml · db.yml
+.github/workflows/ ci.yml · db.yml · discover.yml
 ```
 
-Estructura prevista para las fases 3-7: `apps/companies` (Company, SourceRecord, adaptadores
-`SourceAdapter` → `RawCompany`), `apps/enrichment`, `apps/tracking` (Favorite, Visit),
-`apps/routes`, `apps/offers` y `apps/jobs` (JobRun + disparo de workflows). `apps/core` se
-mantiene transversal.
+Estructura prevista para las fases 4-7: `apps/enrichment`, `apps/tracking` (Favorite, Visit),
+`apps/routes` y `apps/offers`. `apps/core` se mantiene transversal.
+
+### Descubrimiento de empresas (fase 3)
+
+1. `manage.py discover` recorre las fuentes (`apps/companies/sources/`): cada una devuelve
+   `RawCompany` normalizados y deja un `SourceRecord` con el payload crudo. Toda petición HTTP se
+   cachea en `FetchCache` (Overpass: 7 días) y lleva un `User-Agent` propio.
+2. **Dedupe/fusión** (`dedupe.py`): mismo registro → mismo dominio → nombre parecido
+   (`rapidfuzz`) a < 100 m; los campos se fusionan por prioridad de fuente con procedencia por
+   campo; `confidence_score` = fuentes + completitud de contacto; zona por bbox del catálogo.
+3. Corre en GitHub Actions (`discover.yml`): cada lunes a las 05:00 y desde el botón **Buscar
+   nuevas empresas** de la pestaña Explorar, que dispara el workflow con la API de GitHub y
+   muestra el `JobRun` (estado, resumen, enlace al run) sondeando por HTMX.
+4. Fuentes: OpenStreetMap (3a) · Foursquare OS Places y directorios sectoriales (3b). Google
+   Places se descartó (ADR 0009). Datos OSM © colaboradores de OpenStreetMap, ODbL.
 
 ### Perfil y parseo del CV (fase 2)
 
@@ -173,6 +187,7 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
    | `SECRET_KEY` | 50+ caracteres aleatorios |
    | `DATABASE_URL` | URL **pooled** de Neon (`?sslmode=require`) |
    | `NVIDIA_API_KEY` | clave `nvapi-…` gratuita de [build.nvidia.com](https://build.nvidia.com) (parseo del CV) |
+   | `GITHUB_DISPATCH_TOKEN` | PAT *fine-grained* del repo con permiso **Actions: write** (botón "Buscar nuevas empresas") |
 
    Comprueba que *Expose System Environment Variables* está activo (así `ALLOWED_HOSTS` y
    `CSRF_TRUSTED_ORIGINS` se derivan de `VERCEL_URL`). La región de la función (`fra1`) la fija
@@ -203,7 +218,8 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
 | `TEST_DATABASE_URL` | opcional | — | CI (Postgres 17) |
 | `NVIDIA_API_KEY` (+ `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT` opcionales) | opcional | ✅ | fase 4 |
 | `ANTHROPIC_API_KEY` (solo con `LLM_PROVIDER=anthropic`) | opcional | opcional | opcional |
-| `GOOGLE_PLACES_API_KEY`, `FOURSQUARE_API_KEY`, `GITHUB_TOKEN` | fases 3-4 | fase 3 (`GITHUB_TOKEN`) | fases 3-4 |
+| `GITHUB_DISPATCH_TOKEN` (+ `GITHUB_REPO`, `GITHUB_WORKFLOW_REF` opcionales) | opcional | ✅ | — |
+| `HF_TOKEN` (Foursquare OS Places, fase 3b) | — | — | fase 3b |
 
 ### CI
 
@@ -217,10 +233,9 @@ tras un CI verde en `main`.
 
 | Concepto | Llamadas / 100 empresas | Precio unitario | Coste |
 |----------|:-:|:-:|:-:|
-| Google Places · Text Search | se completa en fase 3 | | |
-| Google Places · Place Details | se completa en fase 3 | | |
-| Overpass API (OSM) | — | gratis | 0 € |
-| Foursquare OS Places | — | dataset abierto | 0 € |
+| Overpass API (OSM) | 1 consulta (toda Barcelona, caché 7 días) | gratis (ODbL) | 0 € |
+| Foursquare OS Places | 1 extracción mensual en Actions (3b) | dataset abierto (Apache 2.0) | 0 € |
+| Google Places | descartado (ADR 0009) | — | — |
 | Directorios sectoriales (scraping) | — | gratis | 0 € |
 | Fetch de webs (≤ 5 páginas/dominio) | ≤ 500 | gratis | 0 € |
 | LLM · parseo del CV (una vez por CV) | 1-2 | NVIDIA gratuito (Claude Haiku opcional: ~0,01 $) | **0 €** |

@@ -58,10 +58,6 @@ def _placeholder(request, tab: str):
     return render(request, "core/placeholder.html", context)
 
 
-def explorar(request):
-    return _placeholder(request, "explorar")
-
-
 def mapa(request):
     return _placeholder(request, "mapa")
 
