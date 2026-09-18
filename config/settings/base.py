@@ -118,4 +118,4 @@ LLM_PROVIDER = env("LLM_PROVIDER", default="nvidia")
 NVIDIA_API_KEY = env("NVIDIA_API_KEY", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 LLM_MODEL = env("LLM_MODEL", default="")  # vacío = modelo por defecto del proveedor
-LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=45)
+LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=90)  # el nivel gratuito de NVIDIA es lento y variable

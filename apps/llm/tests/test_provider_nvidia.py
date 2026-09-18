@@ -89,7 +89,8 @@ def test_envia_texto_del_pdf_esquema_y_guided_json(provider):
     assert (completion.input_tokens, completion.output_tokens) == (800, 120)
     call = provider.fake.calls[0]
     assert call["model"] == "meta/llama-3.3-70b-instruct"
-    assert call["extra_body"] == {"nvext": {"guided_json": Salida.model_json_schema()}}
+    assert call["response_format"] == {"type": "json_object"}
+    assert "extra_body" not in call
     system, user = call["messages"]
     assert system["role"] == "system"
     assert "extrae" in system["content"]
@@ -141,15 +142,14 @@ def _status_error(cls, status, message="boom"):
     return cls(message, response=response, body=None)
 
 
-def test_si_nvext_no_se_admite_reintenta_en_modo_json(provider):
+def test_si_response_format_no_se_admite_reintenta_sin_el(provider):
     provider.fake.outcomes = [
-        _status_error(openai.BadRequestError, 400, "nvext not supported"),
+        _status_error(openai.BadRequestError, 400, "response_format not supported"),
         _response('{"nombre": "Laura", "etiquetas": []}'),
     ]
 
     assert _complete(provider).output.nombre == "Laura"
-    assert "extra_body" not in provider.fake.calls[1]
-    assert provider.fake.calls[1]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in provider.fake.calls[1]
 
 
 @pytest.mark.parametrize(
@@ -199,7 +199,8 @@ def test_client_real_apunta_a_nvidia_sin_reintentos(settings):
     assert str(client.base_url).rstrip("/") == BASE_URL
     assert client.max_retries == 0
     assert client.timeout == 45
-    assert NvidiaProvider().price_per_mtok("meta/llama-3.3-70b-instruct") == (0, 0)
+    assert NvidiaProvider().price_per_mtok("openai/gpt-oss-20b") == (0, 0)
+    assert NvidiaProvider().default_model == "openai/gpt-oss-20b"
 
 
 def test_el_esquema_del_prompt_es_json_valido(provider):

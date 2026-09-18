@@ -11,16 +11,21 @@ API gratuita de NVIDIA (build.nvidia.com), OpenAI-compatible.
 
 ## Decisión
 - **Proveedores intercambiables** (`apps/llm/providers/`, `LLM_PROVIDER`): `nvidia` por
-  defecto (gratuito, `meta/llama-3.3-70b-instruct`) y `anthropic` opcional (de pago, Claude
+  defecto (gratuito, `openai/gpt-oss-20b`) y `anthropic` opcional (de pago, Claude
   Haiku 4.5). La capa común (`apps/llm/client.py`) hace caché y contabilidad; cada proveedor
   solo implementa `complete()`.
 - El parseo se ejecuta **en la request** (HTMX + skeleton). `vercel.json` sube `maxDuration`
-  a 60 s; el cliente tiene `timeout` de 45 s y **sin reintentos** (un reintento no cabría en
-  la ventana). Es la única excepción acotada al ADR 0007: una llamada, iniciada por la usuaria.
+  a 120 s; el cliente tiene `timeout` de 90 s y **sin reintentos** (un reintento no cabría en
+  la ventana). El nivel gratuito de NVIDIA es una cola compartida: el mismo CV tarda entre 16
+  y 70 s según el momento. Es la única excepción acotada al ADR 0007: una llamada, iniciada
+  por la usuaria.
 - **NVIDIA no acepta PDF**: el texto se extrae con `pypdf` (si el PDF es un escaneo sin texto,
-  se avisa) y va en el mensaje. La salida se pide con `nvext.guided_json` (lo que NVIDIA
-  recomienda frente a `response_format=json_object`), con el esquema JSON también en el prompt;
-  si el JSON no valida con Pydantic se pide **una** corrección al modelo. Con Anthropic el PDF
+  se avisa) y va en el mensaje. La salida se pide con el esquema JSON en el prompt y
+  `response_format=json_object` (el endpoint alojado rechaza el `nvext.guided_json` que
+  recomienda la documentación de NIM); si el JSON no valida con Pydantic se pide **una**
+  corrección al modelo. Elección del modelo tras probar los disponibles con un CV real:
+  `openai/gpt-oss-20b` (16-26 s, extracción correcta) por defecto; `google/gemma-4-31b-it`
+  extrae igual de bien pero tarda 18-70 s; los modelos de razonamiento agotan el tiempo. Con Anthropic el PDF
   viaja como documento y la validación la hace el SDK (structured outputs).
 - **Caché en BD** (`apps.llm.LLMCall`): cada llamada se guarda con `sha256(proveedor + modelo +
   versión del prompt + system + texto + esquema de salida + PDF)`. Repetir el análisis del

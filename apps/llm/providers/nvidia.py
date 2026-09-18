@@ -2,9 +2,13 @@
 
 - Endpoint `https://integrate.api.nvidia.com/v1`, clave `nvapi-...` (NVIDIA_API_KEY).
 - No acepta PDF: el texto se extrae con pypdf y va en el mensaje de usuario.
-- JSON estructurado con `nvext.guided_json` (recomendado por NVIDIA frente a
-  `response_format=json_object`) + esquema en el prompt + validación Pydantic
-  con un intento de reparación si el JSON no valida.
+- JSON estructurado: esquema en el prompt + `response_format=json_object` (el
+  endpoint alojado rechaza `nvext.guided_json`; si un modelo tampoco admite
+  `response_format`, se reintenta sin él) + validación Pydantic con un intento
+  de reparación si el JSON no valida.
+- Modelo por defecto `openai/gpt-oss-20b`: en el nivel gratuito es el más rápido
+  (16-26 s por CV) con extracción correcta; `google/gemma-4-31b-it` extrae igual
+  de bien pero tarda de 18 a 70 s. Los modelos "de razonamiento" se pasan pensando.
 """
 
 import io
@@ -47,7 +51,7 @@ def extract_pdf_text(data: bytes) -> str:
 
 class NvidiaProvider:
     name = "nvidia"
-    default_model = "meta/llama-3.3-70b-instruct"
+    default_model = "openai/gpt-oss-20b"
 
     def price_per_mtok(self, model: str) -> tuple[Decimal, Decimal]:
         return (Decimal(0), Decimal(0))  # nivel gratuito de build.nvidia.com
@@ -86,7 +90,7 @@ class NvidiaProvider:
         ]
 
         client = self._client()
-        content, usage_in, usage_out = self._chat(client, model, messages, schema, max_tokens)
+        content, usage_in, usage_out = self._chat(client, model, messages, max_tokens)
         try:
             return Completion(_parse(output_model, content), usage_in, usage_out)
         except pydantic.ValidationError as exc:
@@ -102,13 +106,13 @@ class NvidiaProvider:
                     ),
                 },
             ]
-            content2, in2, out2 = self._chat(client, model, messages, schema, max_tokens)
+            content2, in2, out2 = self._chat(client, model, messages, max_tokens)
             try:
                 return Completion(_parse(output_model, content2), usage_in + in2, usage_out + out2)
             except pydantic.ValidationError as exc2:
                 raise LLMError("La IA no devolvió un JSON válido tras dos intentos.") from exc2
 
-    def _chat(self, client, model, messages, schema, max_tokens) -> tuple[str, int, int]:
+    def _chat(self, client, model, messages, max_tokens) -> tuple[str, int, int]:
         params = {
             "model": model,
             "messages": messages,
@@ -119,16 +123,12 @@ class NvidiaProvider:
         try:
             try:
                 response = client.chat.completions.create(
-                    **params, extra_body={"nvext": {"guided_json": schema}}
-                )
-            except openai.BadRequestError as exc:
-                # Algunos modelos alojados no admiten nvext: se reintenta en modo JSON estándar.
-                logger.info(
-                    "nvext.guided_json rechazado (%s); reintento con json_object", exc.message
-                )
-                response = client.chat.completions.create(
                     **params, response_format={"type": "json_object"}
                 )
+            except openai.BadRequestError as exc:
+                # Algún modelo alojado no admite response_format: el esquema del prompt basta.
+                logger.info("response_format rechazado (%s); reintento sin él", exc.message)
+                response = client.chat.completions.create(**params)
         except openai.AuthenticationError as exc:
             raise LLMError("La clave de la API de NVIDIA no es válida.") from exc
         except openai.RateLimitError as exc:

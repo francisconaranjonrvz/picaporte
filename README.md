@@ -79,7 +79,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
-| [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | **LLM gratuito** (NVIDIA, OpenAI-compatible) con proveedores intercambiables; parseo del CV **en la request** (excepción acotada: una llamada, 60 s) y **caché de llamadas** por hash con contabilidad de coste |
+| [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | **LLM gratuito** (NVIDIA, OpenAI-compatible) con proveedores intercambiables; parseo del CV **en la request** (excepción acotada: una llamada, 120 s) y **caché de llamadas** por hash con contabilidad de coste |
 
 ### Estructura del repositorio
 
@@ -109,7 +109,7 @@ mantiene transversal.
 1. El PDF (≤ 4 MB por el límite de body de Vercel) se valida por cabecera `%PDF-` y se guarda
    en Neon como `bytea` (`CVDocument`); solo se conserva el actual.
 2. "Analizar con IA" extrae el texto del PDF (`pypdf`) y lo envía al LLM gratuito de NVIDIA
-   (`meta/llama-3.3-70b-instruct`, API OpenAI-compatible) pidiendo JSON guiado por el esquema
+   (`openai/gpt-oss-20b`, API OpenAI-compatible) pidiendo JSON según el esquema
    de `ParsedCV` (Pydantic); si no valida, se pide una corrección. Con `LLM_PROVIDER=anthropic`
    el PDF viaja como documento a Claude Haiku con *structured outputs*. El prompt vive en
    [`prompts/cv_parse_v1.md`](prompts/cv_parse_v1.md).

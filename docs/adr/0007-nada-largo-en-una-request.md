@@ -3,7 +3,7 @@
 **Estado:** aceptada · 2026-09-16
 
 ## Decisión
-- `maxDuration` acotado en `vercel.json` actúa como guarda dura (60 s desde el ADR 0008, que
+- `maxDuration` acotado en `vercel.json` actúa como guarda dura (120 s desde el ADR 0008, que
   admite una única llamada corta a la IA iniciada por la usuaria).
 - Todo trabajo pesado (descubrimiento multi-fuente, fetch de webs, llamadas a la Anthropic
   API) se ejecuta en GitHub Actions como comandos de gestión contra Neon. La web solo lanza
