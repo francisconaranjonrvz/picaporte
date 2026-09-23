@@ -1,0 +1,28 @@
+{% load ui %}
+{% with company=stop.company e=stop.company.enrichment %}
+<li id="stop-{{ stop.pk }}" class="card {% if stop.is_done %}opacity-70{% endif %}">
+  <div class="flex items-start gap-3">
+    <span class="flex size-8 shrink-0 items-center justify-center rounded-full {% if stop.is_done %}bg-success text-success-ink{% else %}bg-action-fill text-white{% endif %} font-bold">{{ stop.position }}</span>
+    <div class="min-w-0 flex-1">
+      <a href="{% url 'ficha' company.pk %}" class="block truncate font-bold">{{ company.name }}</a>
+      <p class="truncate text-sm text-muted">{% firstof company.address company.category.name %}</p>
+      {% if stop.is_done %}<span class="badge badge-success mt-1">{{ stop.get_state_display }}</span>{% endif %}
+    </div>
+    {% if company.maps_url %}
+    <a href="https://www.google.com/maps/dir/?api=1&amp;travelmode=walking&amp;destination={{ company.lat|stringformat:'.6f' }},{{ company.lng|stringformat:'.6f' }}"
+       target="_blank" rel="noopener" class="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/50 text-action-fill" aria-label="Cómo llegar a {{ company.name }}">{% icon "navigation" "size-5" %}</a>
+    {% endif %}
+  </div>
+  {% if e.hook and not stop.is_done %}<p class="mt-2 rounded-xl bg-bg p-3 text-sm italic">«{{ e.hook }}»</p>{% endif %}
+  {% if not stop.is_done %}
+  <div class="mt-3 grid grid-cols-2 gap-2">
+    <button type="button" class="btn-primary col-span-2" hx-post="{% url 'parada_estado' stop.pk %}" hx-vals='{"state": "{{ states.DELIVERED }}"}' hx-target="#stop-{{ stop.pk }}" hx-swap="outerHTML">{% icon "check" "size-5" %}CV entregado</button>
+    {% for value, label in states.choices %}{% if value != states.PENDING and value != states.DELIVERED %}
+    <button type="button" class="chip justify-center" hx-post="{% url 'parada_estado' stop.pk %}" hx-vals='{"state": "{{ value }}"}' hx-target="#stop-{{ stop.pk }}" hx-swap="outerHTML">{{ label }}</button>
+    {% endif %}{% endfor %}
+  </div>
+  {% else %}
+  <button type="button" class="mt-2 text-sm font-semibold text-action-fill" hx-post="{% url 'parada_estado' stop.pk %}" hx-vals='{"state": "{{ states.PENDING }}"}' hx-target="#stop-{{ stop.pk }}" hx-swap="outerHTML">Deshacer</button>
+  {% endif %}
+</li>
+{% endwith %}

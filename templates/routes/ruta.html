@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load static ui %}
+{% block head %}{% if route %}<link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">{% endif %}{% endblock %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="text-2xl font-extrabold tracking-tight">Ruta</h1>
+  <p class="text-sm text-muted">Elige día, zona y franja: te propongo 6-10 empresas abiertas, ordenadas para ir andando.</p>
+</header>
+
+<div class="space-y-4">
+  {% card %}
+    <form method="post" action="{% url 'ruta_crear' %}" class="grid grid-cols-2 gap-3"
+          x-data="{ here: false, busy: false }"
+          x-on:submit="if (here && !$refs.lat.value) { $event.preventDefault(); busy = true;
+            navigator.geolocation.getCurrentPosition(
+              (p) => { $refs.lat.value = p.coords.latitude.toFixed(6); $refs.lng.value = p.coords.longitude.toFixed(6); $el.submit(); },
+              () => { busy = false; here = false; window.dispatchEvent(new CustomEvent('toast', { detail: 'Sin ubicación: salgo del centro de la zona.' })); $el.requestSubmit(); }
+            ); }">
+      {% csrf_token %}
+      {% for field in form.visible_fields %}
+      <div class="{% if field.name == 'zone' %}col-span-2{% endif %}">
+        <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      {% endfor %}
+      <input type="hidden" name="start_lat" x-ref="lat" value="">
+      <input type="hidden" name="start_lng" x-ref="lng" value="">
+      <label class="col-span-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" x-model="here" class="size-5 rounded border-primary text-action-fill">
+        Salir desde mi ubicación actual
+      </label>
+      <button type="submit" class="btn-primary col-span-2" x-bind:disabled="busy">
+        {% icon "route" "size-5" %}<span x-text="busy ? 'Buscando tu ubicación…' : 'Proponer ruta'">Proponer ruta</span>
+      </button>
+    </form>
+  {% endcard %}
+
+  {% if route %}
+  {% card %}
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <h2 class="font-bold">{{ route.date|date:"l j \d\e F"|capfirst }}</h2>
+        <p class="text-sm text-muted">{{ route.zone.name|default:"Toda Barcelona" }} · {{ route.get_slot_display }}</p>
+      </div>
+      {% if stops %}<span class="badge badge-primary shrink-0">{{ done }}/{{ stops|length }}</span>{% endif %}
+    </div>
+
+    {% if stops %}
+      <p class="mt-2 text-sm text-muted">{{ stops|length }} paradas · {{ total_km }} km · unos {{ total_min }} min andando (sin contar las visitas).</p>
+      <div id="route-map" class="mt-3 h-56 overflow-hidden rounded-2xl" data-points="{{ points }}" role="img" aria-label="Mapa de la ruta"></div>
+      <ol class="mt-3 divide-y divide-primary/40">
+        {% for stop in stops %}
+        <li class="flex items-center gap-3 py-2 {% if stop.is_done %}opacity-60{% endif %}">
+          <span class="flex size-7 shrink-0 items-center justify-center rounded-full {% if stop.is_done %}bg-success text-success-ink{% else %}bg-action-fill text-white{% endif %} text-sm font-bold">{{ stop.position }}</span>
+          <a href="{% url 'ficha' stop.company_id %}" class="min-w-0 flex-1">
+            <span class="block truncate font-semibold">{{ stop.company.name }}</span>
+            <span class="block truncate text-xs text-muted">{{ stop.company.category.name|default:"" }}{% if stop.walk_min %} · {{ stop.walk_min }} min{% endif %}{% if stop.is_done %} · {{ stop.get_state_display }}{% endif %}</span>
+          </a>
+          {% if stop.company.enrichment.fit_score is not None %}<span class="badge badge-muted shrink-0">{{ stop.company.enrichment.fit_score }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      <div class="mt-3 grid gap-2">
+        {% url "modo_ruta" route.pk as modo_url %}
+        {% btn href=modo_url size="lg" cls="w-full" %}{% icon "door-open" "size-5" %}Empezar modo ruta{% endbtn %}
+        {% btn href=maps_url variant="secondary" size="md" cls="w-full" %}{% icon "navigation" "size-5" %}Abrir en Google Maps{% endbtn %}
+      </div>
+      {% if maps_legs %}
+      <details class="mt-2 text-sm">
+        <summary class="cursor-pointer font-semibold text-action-fill">¿Se abre en el navegador y faltan paradas?</summary>
+        <p class="mt-1 text-muted">Google Maps en el navegador del móvil solo admite 3 paradas intermedias. Abre la ruta por tramos:</p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          {% for first, last, url in maps_legs %}<a class="chip" href="{{ url }}" target="_blank" rel="noopener">Paradas {{ first }}-{{ last }}</a>{% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    {% else %}
+      {% include "components/empty_state.html" with icon="route" title="No hay empresas para esa franja" text="Prueba otra zona, otra franja o toda Barcelona. Las empresas ya resueltas (CV entregado, visitada o descartada) no se proponen." %}
+    {% endif %}
+  {% endcard %}
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if stops %}
+<script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
+<script>
+  (() => {
+    const el = document.getElementById("route-map");
+    const points = JSON.parse(el.dataset.points);
+    const css = getComputedStyle(document.documentElement);
+    const color = (name) => css.getPropertyValue(`--color-${name}`).trim();
+    const map = L.map(el, { zoomControl: false, attributionControl: true, preferCanvas: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+    const latlngs = points.map((p) => [p.lat, p.lng]);
+    L.polyline(latlngs, { color: color("action"), weight: 3, dashArray: "6 6" }).addTo(map);
+    points.forEach((p) =>
+      L.marker([p.lat, p.lng], {
+        icon: L.divIcon({ className: "", html: `<span class="route-pin">${p.n}</span>`, iconSize: [26, 26] }),
+        title: p.name,
+      }).addTo(map)
+    );
+    map.fitBounds(latlngs, { padding: [24, 24] });
+  })();
+</script>
+{% endif %}
+{% endblock %}

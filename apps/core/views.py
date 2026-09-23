@@ -13,15 +13,6 @@ from .design import PAIRS, TOKENS
 # Estados de visita del modelo real, con su badge (se muestran en /styleguide).
 VISIT_STATES = [(value, label, Visit.BADGES[value]) for value, label in Visit.Status.choices]
 
-# Pestañas de la barra inferior: (url_name, etiqueta, icono, fase en la que llega).
-TABS = [
-    ("explorar", "Explorar", "compass", 5),
-    ("mapa", "Mapa", "map", 5),
-    ("favoritas", "Favoritas", "heart", 5),
-    ("ruta", "Ruta", "route", 6),
-    ("perfil", "Perfil", "user", 2),
-]
-
 
 @login_not_required
 @require_GET
@@ -40,21 +31,6 @@ def health(request):
         "env": settings.APP_ENV,
     }
     return JsonResponse(payload, status=200 if db == "ok" else 503)
-
-
-def _placeholder(request, tab: str):
-    _, label, icon, phase = next(t for t in TABS if t[0] == tab)
-    context = {
-        "title": label,
-        "icon": icon,
-        "phase": phase,
-        "text": f"Esta pestaña llega en la fase {phase}. De momento puedes explorar el design system.",
-    }
-    return render(request, "core/placeholder.html", context)
-
-
-def ruta(request):
-    return _placeholder(request, "ruta")
 
 
 @login_not_required

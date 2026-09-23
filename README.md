@@ -17,7 +17,7 @@ hosting **0 €**.
 | ✅ Hecha | **3 · Descubrimiento multi-fuente**: OpenStreetMap (Overpass), Foursquare OS Places (DuckDB sobre el parquet de Hugging Face) y el censo municipal de locales (Open Data BCN); dedupe/fusión, `confidence_score`, ingesta por lotes, retirada de lo que desaparece, workflow semanal + botón "Buscar nuevas empresas" con estado en la UI. Sin Google Places ni directorios con anti-bot (ADR 0009) |
 | ✅ Hecha | **4 · Enriquecimiento**: rastreo educado de la web (≤ 5 páginas, robots.txt, pausas), extracción y puntuación de encaje con IA gratuita en dos etapas (Pydantic, prompts versionados, caché por hash), gancho para presentarse, "Recalcular encaje" al cambiar el perfil sin volver a leer webs; cada noche en Actions (ADR 0010) |
 | ✅ Hecha | **5 · UI principal**: Explorar con filtros (encaje, categoría, zona, estado, abierto ahora, catalán, confianza, favoritas) y paginación HTMX, Mapa (Leaflet), ficha con acciones de un toque, Favoritas con prioridad y arrastrar para ordenar, estados, notas y próximas acciones (ADR 0011) |
-| ⏳ Pendiente | 6 · Ruta del día con Google Maps |
+| ✅ Hecha | **6 · Ruta**: día, zona y franja → 6-10 empresas abiertas priorizando favoritas y encaje, ordenadas a pie (vecino más cercano + 2-opt), enlace de Google Maps (y por tramos para el navegador móvil) y modo ruta para marcar paradas (ADR 0012) |
 | ⏳ Pendiente | 7 · Ofertas (import desde career-ops) |
 
 ## Arquitectura
@@ -79,6 +79,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0012](docs/adr/0012-rutas-a-pie.md) | **Rutas a pie** sin APIs de pago: planificador propio (prioridad + vecino más cercano + 2-opt), enlaces `dir/?api=1` con ≤ 9 paradas y tramos de 3 para navegadores móviles; proponer no cambia estados, marcar sí y deshacer restaura |
 | [0011](docs/adr/0011-ui-principal-y-seguimiento.md) | **UI principal**: un formulario de filtros para lista y mapa, HTMX para parciales y acciones de un toque, horario OSM + horario de oficina estimado para "abierto ahora", Leaflet y SortableJS vendorizados, seguimiento con `Favorite`/`Visit`/`Note` |
 | [0010](docs/adr/0010-enriquecimiento-en-dos-etapas.md) | **Enriquecimiento en dos etapas**: rastreo propio y educado que guarda solo texto; *extracción* (depende de la web) y *puntuación* por lotes (perfil + empresa) con prompts versionados; cambiar el perfil solo repite la puntuación; modelo de volumen `LLM_MODEL_FAST`; cada noche en Actions con presupuesto de tiempo |
 | [0009](docs/adr/0009-fuentes-de-descubrimiento-y-fusion.md) | **Sin Google Places** (tarjeta obligatoria y términos que prohíben guardar datos); fuentes abiertas con adaptadores `SourceAdapter → RawCompany`, caché HTTP en BD, dedupe por dominio/nombre+distancia, `confidence_score` y trabajos en Actions lanzados desde la app |
@@ -96,6 +97,7 @@ apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y pa
 apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany) · dedupe.py · filters.py · opening.py (horarios) · Explorar, ficha, Mapa, Datos · discover
 apps/enrichment/   Enrichment + CompanyPage · crawler.py (robots, ≤ 5 páginas) · services.py (extracción y puntuación) · profile.py (lo que usa la web) · enrich
 apps/tracking/     Favorite, Visit, Note · acciones de un toque (HTMX) y pestaña Favoritas
+apps/routes/       Route, RouteStop · planner.py (candidatas, prioridad, orden a pie) · enlaces de Google Maps · modo ruta
 apps/jobs/         JobRun + cliente de la API de GitHub (dispatch de workflows y estado)
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
@@ -106,7 +108,7 @@ docs/adr/          decisiones de arquitectura
 .github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml
 ```
 
-Estructura prevista para las fases 6-7: `apps/routes` y `apps/offers`. `apps/core` se mantiene transversal.
+Estructura prevista para la fase 7: `apps/offers`. `apps/core` se mantiene transversal.
 
 ### Descubrimiento de empresas (fase 3)
 
@@ -130,6 +132,19 @@ Estructura prevista para las fases 6-7: `apps/routes` y `apps/offers`. `apps/cor
    - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
 5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
    fuentes pasan a inactivas (no se borran).
+
+### Ruta del día (fase 6)
+
+1. En **Ruta** se elige día, franja (mañana, tarde o todo el día), zona y número de paradas
+   (6-10); opcionalmente, salir desde la ubicación actual.
+2. El planificador toma las empresas abiertas en esa franja y aún no resueltas, las prioriza
+   (favoritas, encaje, "volver", próximas acciones de ese día) y ordena las elegidas para ir
+   andando (vecino más cercano + 2-opt). Muestra mapa, kilómetros y minutos estimados.
+3. **Abrir en Google Maps** lleva todas las paradas a pie; si se abre en el navegador del móvil
+   (que solo admite 3 intermedias), hay enlaces por tramos.
+4. **Modo ruta**: una tarjeta por parada con el gancho para presentarse, "cómo llegar" y marcas
+   de un toque (CV entregado, visitada, cerrada, saltar) que actualizan el seguimiento; "Deshacer"
+   restaura el estado anterior.
 
 ### Explorar, mapa y seguimiento (fase 5)
 

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<header class="mb-3 flex items-start gap-3">
+  <a href="{% url 'ruta' %}" class="flex size-11 shrink-0 items-center justify-center rounded-full bg-surface shadow-soft" aria-label="Volver a Ruta">{% icon "arrow-left" "size-5" %}</a>
+  <div class="min-w-0 flex-1">
+    <h1 class="text-2xl font-extrabold tracking-tight">Modo ruta</h1>
+    <p class="text-sm text-muted">{{ route.zone.name|default:"Toda Barcelona" }} · {{ route.get_slot_display }}</p>
+  </div>
+</header>
+
+<div hx-get="{% url 'ruta_progreso' route.pk %}" hx-trigger="route-progress from:body" hx-swap="innerHTML">
+  {% include "routes/_progress.html" %}
+</div>
+
+<ol class="mt-4 space-y-3">
+  {% for stop in stops %}{% include "routes/_stop.html" %}{% endfor %}
+</ol>
+
+<p class="mt-4 px-1 text-xs text-muted">Marcar una parada actualiza su estado en la ficha: "CV entregado" y "Visitada" la sacan de próximas rutas; "Cerrada" la deja para volver.</p>
+{% endblock %}

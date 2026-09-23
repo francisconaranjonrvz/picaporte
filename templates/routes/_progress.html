@@ -1,0 +1,9 @@
+<div class="card">
+  <div class="flex items-center justify-between text-sm font-semibold">
+    <span>{{ done }} de {{ stops|length }} paradas</span>
+    {% if done == stops|length and stops %}<span class="text-success-ink">¡Ruta completa!</span>{% endif %}
+  </div>
+  <div class="mt-2 h-2 overflow-hidden rounded-full bg-primary/50" role="progressbar" aria-valuemin="0" aria-valuemax="{{ stops|length }}" aria-valuenow="{{ done }}">
+    <div class="h-full rounded-full bg-action-fill transition-all duration-200" style="width: {% widthratio done stops|length|default:1 100 %}%"></div>
+  </div>
+</div>

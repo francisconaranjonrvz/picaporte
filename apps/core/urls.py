@@ -4,7 +4,6 @@ from . import views
 
 urlpatterns = [
     path("health", views.health, name="health"),
-    path("ruta/", views.ruta, name="ruta"),
     path("styleguide", views.styleguide, name="styleguide"),
     path("styleguide/demo", views.styleguide_demo, name="styleguide_demo"),
     # PWA: servidos por Django para que el scope del service worker sea "/".

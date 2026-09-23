@@ -157,6 +157,12 @@
       shadow-float;
   }
 
+  /* Número de parada en el mapa de la ruta (divIcon de Leaflet) */
+  .route-pin {
+    @apply flex size-[26px] items-center justify-center rounded-full border-2 border-white bg-action-fill
+      text-xs font-bold text-white shadow-soft;
+  }
+
   /* Estado vacío */
   .empty-state {
     @apply flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed
