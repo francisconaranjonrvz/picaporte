@@ -26,6 +26,11 @@ dev = [
   "ruff>=0.16",
   "pre-commit>=4",
   "resvg-py>=0.5",
+  "duckdb>=1.5,<2",
+]
+# Solo para los workers de GitHub Actions (discover.yml); Vercel no lo instala.
+worker = [
+  "duckdb>=1.5,<2",
 ]
 
 # Vercel: entrypoint WSGI explícito (la detección zero-config también lo resuelve vía WSGI_APPLICATION).

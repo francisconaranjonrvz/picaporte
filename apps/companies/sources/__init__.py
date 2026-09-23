@@ -1,10 +1,12 @@
 """Registro de fuentes: nombre corto -> adaptador."""
 
 from .base import RawCompany, SourceAdapter, SourceError
+from .foursquare import FoursquareAdapter
 from .overpass import OverpassAdapter
 
 ADAPTERS: dict[str, type] = {
     "osm": OverpassAdapter,
+    "foursquare": FoursquareAdapter,
 }
 
 

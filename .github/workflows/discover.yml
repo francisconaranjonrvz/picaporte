@@ -38,12 +38,14 @@ jobs:
       SECRET_KEY: ${{ secrets.SECRET_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       ALLOWED_HOSTS: localhost
+      # Lectura del dataset restringido foursquare/fsq-os-places en Hugging Face.
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
-      - run: uv sync --locked --no-dev
+      - run: uv sync --locked --no-dev --group worker
       - name: Descubrir empresas
         run: >-
           uv run python manage.py discover
