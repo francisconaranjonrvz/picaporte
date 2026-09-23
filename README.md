@@ -14,7 +14,7 @@ hosting **0 €**.
 |--------|------|
 | ✅ Hecha | **1 · Esqueleto**: Django 5.2, settings por entorno, Neon, Vercel, `/health`, login, CI, design system y `/styleguide`, PWA |
 | ✅ Hecha | **2 · Perfil**: CV en PDF guardado en Neon (≤ 4 MB), parseo con un LLM gratuito (NVIDIA, JSON guiado + Pydantic, caché por hash; Claude opcional), perfil editable y preferencias (categorías, zonas, tamaño, idiomas, intereses) |
-| 🚧 En curso | **3 · Descubrimiento multi-fuente**: 3a hecha (OpenStreetMap vía Overpass, dedupe/fusión, `confidence_score`, comando `discover`, workflow semanal + botón "Buscar nuevas empresas" con estado en la UI); 3b pendiente (Foursquare OS Places y directorios sectoriales). Sin Google Places (ADR 0009) |
+| ✅ Hecha | **3 · Descubrimiento multi-fuente**: OpenStreetMap (Overpass), Foursquare OS Places (DuckDB sobre el parquet de Hugging Face) y el censo municipal de locales (Open Data BCN); dedupe/fusión, `confidence_score`, ingesta por lotes, retirada de lo que desaparece, workflow semanal + botón "Buscar nuevas empresas" con estado en la UI. Sin Google Places ni directorios con anti-bot (ADR 0009) |
 | ⏳ Pendiente | 4 · Enriquecimiento (fetch web + Claude Haiku + Pydantic) y `fit_score` |
 | ⏳ Pendiente | 5 · UI principal: Explorar, Mapa, ficha, Favoritas, tracker |
 | ⏳ Pendiente | 6 · Ruta del día con Google Maps |
@@ -45,8 +45,10 @@ flowchart LR
 
     subgraph Fuentes["Fuentes externas"]
         OSM["Overpass (OSM)"]
-        FSQ["Foursquare OS Places (3b)"]
-        DIR["Directorios sectoriales (3b)"]
+        FSQ["Foursquare OS Places
+(Hugging Face + DuckDB)"]
+        DIR["Open Data BCN
+(censo de locales)"]
         LLM["LLM: NVIDIA (gratis) / Anthropic (opcional)"]
     end
 
@@ -108,15 +110,24 @@ Estructura prevista para las fases 4-7: `apps/enrichment`, `apps/tracking` (Favo
 
 1. `manage.py discover` recorre las fuentes (`apps/companies/sources/`): cada una devuelve
    `RawCompany` normalizados y deja un `SourceRecord` con el payload crudo. Toda petición HTTP se
-   cachea en `FetchCache` (Overpass: 7 días) y lleva un `User-Agent` propio.
+   cachea en `FetchCache` (Overpass: 7 días) y lleva un `User-Agent` propio. La ingesta es por
+   lotes (índice en memoria + `bulk_create`/`bulk_update`): ~1 min para todas las fuentes.
 2. **Dedupe/fusión** (`dedupe.py`): mismo registro → mismo dominio → nombre parecido
    (`rapidfuzz`) a < 100 m; los campos se fusionan por prioridad de fuente con procedencia por
    campo; `confidence_score` = fuentes + completitud de contacto; zona por bbox del catálogo.
 3. Corre en GitHub Actions (`discover.yml`): cada lunes a las 05:00 y desde el botón **Buscar
    nuevas empresas** de la pestaña Explorar, que dispara el workflow con la API de GitHub y
    muestra el `JobRun` (estado, resumen, enlace al run) sondeando por HTMX.
-4. Fuentes: OpenStreetMap (3a) · Foursquare OS Places y directorios sectoriales (3b). Google
-   Places se descartó (ADR 0009). Datos OSM © colaboradores de OpenStreetMap, ODbL.
+4. Fuentes (ADR 0009):
+   - **OpenStreetMap** vía Overpass: una consulta con filtros exactos al bbox de Barcelona.
+   - **Foursquare OS Places**: DuckDB consulta el parquet de Hugging Face por HTTP (`hf://`,
+     ~16 s) filtrando bbox, locales abiertos y etiquetas del sector; descarta lugares sin
+     refrescar en 3 años. Requiere `HF_TOKEN` y aceptar las condiciones del dataset.
+   - **Censo de locales en planta baixa** (Open Data BCN): locales a pie de calle con dirección
+     y coordenadas; categoría por palabras clave en el nombre.
+   - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
+5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
+   fuentes pasan a inactivas (no se borran).
 
 ### Perfil y parseo del CV (fase 2)
 
@@ -219,7 +230,7 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
 | `NVIDIA_API_KEY` (+ `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT` opcionales) | opcional | ✅ | fase 4 |
 | `ANTHROPIC_API_KEY` (solo con `LLM_PROVIDER=anthropic`) | opcional | opcional | opcional |
 | `GITHUB_DISPATCH_TOKEN` (+ `GITHUB_REPO`, `GITHUB_WORKFLOW_REF` opcionales) | opcional | ✅ | — |
-| `HF_TOKEN` (Foursquare OS Places, fase 3b) | — | — | fase 3b |
+| `HF_TOKEN` (lectura, con acceso a `foursquare/fsq-os-places`) | opcional | — | ✅ |
 
 ### CI
 
@@ -234,9 +245,10 @@ tras un CI verde en `main`.
 | Concepto | Llamadas / 100 empresas | Precio unitario | Coste |
 |----------|:-:|:-:|:-:|
 | Overpass API (OSM) | 1 consulta (toda Barcelona, caché 7 días) | gratis (ODbL) | 0 € |
-| Foursquare OS Places | 1 extracción mensual en Actions (3b) | dataset abierto (Apache 2.0) | 0 € |
+| Foursquare OS Places | 1 consulta DuckDB por ejecución (~16 s, solo columnas y bloques filtrados) | gratis (Apache 2.0, token HF) | 0 € |
+| Open Data BCN (censo de locales) | 1 descarga CSV (~25 MB) por ejecución | gratis (CC-BY 4.0) | 0 € |
 | Google Places | descartado (ADR 0009) | — | — |
-| Directorios sectoriales (scraping) | — | gratis | 0 € |
+| Directorios sectoriales | descartados (anti-bot, ADR 0009) | — | — |
 | Fetch de webs (≤ 5 páginas/dominio) | ≤ 500 | gratis | 0 € |
 | LLM · parseo del CV (una vez por CV) | 1-2 | NVIDIA gratuito (Claude Haiku opcional: ~0,01 $) | **0 €** |
 | LLM · extracción | se completa en fase 4 | NVIDIA gratuito | 0 € |
@@ -259,5 +271,8 @@ llamada); recalcular el `fit_score` al cambiar el perfil no repite ningún fetch
 
 ## Licencia
 
-MIT. Terceros: Plus Jakarta Sans (OFL, `static/fonts/OFL.txt`), Lucide (ISC), Alpine.js (MIT)
+MIT. Datos: © colaboradores de OpenStreetMap (ODbL); Foursquare OS Places (Apache 2.0);
+Ajuntament de Barcelona, Open Data BCN (CC-BY 4.0).
+
+Terceros: Plus Jakarta Sans (OFL, `static/fonts/OFL.txt`), Lucide (ISC), Alpine.js (MIT)
 y htmx (BSD) — ver [`static/vendor/LICENSES.md`](static/vendor/LICENSES.md).

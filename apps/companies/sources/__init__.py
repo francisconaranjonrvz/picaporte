@@ -2,13 +2,13 @@
 
 from .base import RawCompany, SourceAdapter, SourceError
 from .foursquare import FoursquareAdapter
+from .opendata_bcn import OpenDataBcnAdapter
 from .overpass import OverpassAdapter
-from .sortlist import SortlistAdapter
 
 ADAPTERS: dict[str, type] = {
     "osm": OverpassAdapter,
     "foursquare": FoursquareAdapter,
-    "sortlist": SortlistAdapter,
+    "opendata_bcn": OpenDataBcnAdapter,
 }
 
 

@@ -87,7 +87,7 @@ def test_merge_respeta_prioridad_y_guarda_procedencia():
     # Una fuente menos prioritaria no pisa; la misma fuente sí actualiza su dato.
     merge_into(
         company,
-        _raw(source=Source.PAGINAS_AMARILLAS, external_id="pa/1", phone="000", name="BUZZ SL"),
+        _raw(source=Source.OPENDATA_BCN, external_id="cens/1", phone="000", name="BUZZ SL"),
     )
     assert company.phone == "930"
     assert company.name == "Buzz Agencia"

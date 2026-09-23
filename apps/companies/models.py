@@ -9,10 +9,7 @@ from apps.catalog.models import Category, Zone
 class Source(models.TextChoices):
     OSM = "osm", "OpenStreetMap"
     FOURSQUARE = "foursquare", "Foursquare OS Places"
-    SORTLIST = "sortlist", "Sortlist"
-    CLUTCH = "clutch", "Clutch"
-    PAGINAS_AMARILLAS = "paginas_amarillas", "Páginas Amarillas"
-    ASSOCIATION = "association", "Asociación sectorial"
+    OPENDATA_BCN = "opendata_bcn", "Cens de locals (Ajuntament de Barcelona)"
     MANUAL = "manual", "Manual"
 
 
@@ -21,10 +18,8 @@ SOURCE_PRIORITY: dict[str, int] = {
     Source.MANUAL: 100,
     Source.FOURSQUARE: 60,
     Source.OSM: 50,
-    Source.SORTLIST: 40,
-    Source.CLUTCH: 40,
-    Source.ASSOCIATION: 35,
-    Source.PAGINAS_AMARILLAS: 30,
+    # Dirección municipal fiable pero nombres en mayúsculas y categoría inferida del nombre.
+    Source.OPENDATA_BCN: 40,
 }
 
 

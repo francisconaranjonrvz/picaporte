@@ -15,11 +15,11 @@ Verificado contra documentación viva en septiembre de 2026:
   (406 a los genéricos) y pide pausar 30 s tras 429/504. Los filtros por regex sobre áreas
   grandes acaban en 504; los exactos usan índice.
 - **Foursquare OS Places** ya no se sirve desde S3 público: se accede por Hugging Face (dataset
-  gated con token gratuito) o el portal de Foursquare; ~11,6 GB por release, sin orden espacial.
+  gated con token gratuito) o el portal de Foursquare; ~11,6 GB por release en 100 parquet.
 
 ## Decisión
-- **Sin Google Places.** Fuentes: OSM (3a), Foursquare OS Places y directorios sectoriales (3b).
-  Todas gratuitas, con datos abiertos o consultables sin conflicto de términos.
+- **Sin Google Places.** Fuentes: OSM (3a), Foursquare OS Places y el censo municipal de locales
+  de Open Data BCN (3b). Todas gratuitas y con licencia abierta (ODbL, Apache 2.0, CC-BY 4.0).
 - **Interfaz `SourceAdapter` → `RawCompany`** (`apps/companies/sources/`): añadir una fuente es
   una clase con `fetch()`. Cada fuente deja un `SourceRecord` (payload crudo, id externo) y la
   fusión es común.
@@ -32,7 +32,7 @@ Verificado contra documentación viva en septiembre de 2026:
 - **Deduplicación** (`dedupe.py`): (1) mismo registro de fuente; (2) mismo dominio web
   normalizado (el más cercano si hay varios); (3) nombre normalizado (sin acentos ni sufijos
   legales) con `rapidfuzz.token_set_ratio ≥ 90` a menos de 100 m. **Fusión** campo a campo por
-  prioridad de fuente (Foursquare > OSM > directorios) con procedencia en `Company.field_sources`;
+  prioridad de fuente (Foursquare > OSM > censo municipal) con procedencia en `Company.field_sources`;
   una fuente siempre puede refrescar su propio dato.
 - **`confidence_score`** (0-100): 15 + 20 por fuente independiente (máx. 3) + web 10 + teléfono 8
   + dirección 6 + coordenadas 6 + categoría 5.
@@ -51,3 +51,31 @@ Verificado contra documentación viva en septiembre de 2026:
 - Los datos guardados (nombre, dirección, web…) proceden de fuentes abiertas; la atribución
   ODbL/Apache 2.0 va en el README.
 - Un descubrimiento completo no toca la web: ni latencia ni riesgo en Vercel (ADR 0007).
+
+## Actualización · fase 3b (2026-09-23)
+
+- **Foursquare OS Places**: DuckDB lee `hf://datasets/foursquare/fsq-os-places/release/<última>/`
+  sin descargar el volcado; solo baja las columnas y los row groups que pasan el filtro (bbox de
+  Barcelona, `date_closed IS NULL`, etiquetas del sector). La consulta tarda **~16 s** en
+  Actions. Las categorías se reconocen por palabras clave en la hoja de la etiqueta
+  (`… > Advertising Agency`), sin depender de ids. Se descartan los lugares sin refrescar en
+  3 años (2/3 del total en Barcelona: cerrados sin marcar). Da ~870 empresas.
+  DuckDB va en un grupo `worker` de uv: solo lo instala `discover.yml`, nunca Vercel.
+  `HF_TOKEN` (lectura) es secreto del entorno `production`.
+- **Directorios sectoriales descartados.** Clutch (Cloudflare) y Páginas Amarillas (Incapsula)
+  responden con desafíos anti-bot; Sortlist permite sus listados en `robots.txt`, pero su CDN
+  devuelve 403 a cualquier cliente que no sea un navegador (huella TLS), también desde casa.
+  Imitar un navegador sería evadir su detección de bots: no se hace.
+- **Sustituto: censo municipal de locales en planta baixa** (Open Data BCN, CC-BY 4.0). Ofrece
+  nombre, actividad, dirección y coordenadas de ~68.000 locales a pie de calle, justo el tipo de
+  sitio donde se entrega un CV en mano. Las actividades son gruesas, así que se filtran dos
+  (`Serveis a les empreses i oficines`, `Arts gràfiques`) y se clasifica por palabras clave en el
+  nombre del local (~150 empresas). El CSV (~25 MB) se procesa en streaming sin cachearlo en BD.
+- **Ingesta por lotes.** Con ~7 consultas por empresa, 2.700 lugares tardaban más de 30 min
+  (Actions en EE. UU. ↔ Neon en Frankfurt). Ahora se cargan empresas y registros una vez, se
+  decide todo en memoria (índice por dominio y rejilla de ~200 m) y se escribe con
+  `bulk_create`/`bulk_update` cada 500: el descubrimiento completo tarda ~1 min.
+- **Retirada.** Tras una lectura completa y sin errores de una fuente, sus registros que ya no
+  aparecen se borran; una empresa sin ninguna fuente pasa a inactiva (no se borra: puede tener
+  favoritos o visitas) y vuelve a activarse si reaparece. Una fuente caída o vacía no retira nada.
+- `apps.companies.http.robots_allows()` queda para la fase 4 (visitar webs de empresas).
