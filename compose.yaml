@@ -1,0 +1,48 @@
+# Desarrollo local con Postgres 17 (la versión de Neon). Uso:
+#   docker compose up --build                       # web en http://localhost:8000
+#   docker compose run --rm web python manage.py ensure_user --username laura --password ...
+#   docker compose run --rm web pytest -q           # tests contra Postgres
+#   docker compose --profile css up css             # Tailwind en modo watch
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: picaporte
+      POSTGRES_PASSWORD: picaporte
+      POSTGRES_DB: picaporte
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U picaporte -d picaporte"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DATABASE_URL: postgres://picaporte:picaporte@db:5432/picaporte
+      # Los tests crean su propia BD (test_picaporte) en el mismo servidor.
+      TEST_DATABASE_URL: postgres://picaporte:picaporte@db:5432/picaporte_test
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  css:
+    profiles: ["css"]
+    build: .
+    command: python scripts/tw.py watch --poll
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:

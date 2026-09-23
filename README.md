@@ -108,6 +108,7 @@ scripts/           tw.py (Tailwind standalone) · make_icons.py (PNG desde SVG)
 prompts/           prompts versionados (`cv_parse_v1`, `enrich_extract_v1`, `enrich_score_v1`)
 docs/adr/          decisiones de arquitectura
 .github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml
+Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con runserver)
 ```
 
 `apps/core` se mantiene transversal (health, pestañas comunes, styleguide, PWA).
@@ -242,6 +243,18 @@ uv run pre-commit install                  # opcional: ruff antes de cada commit
 Para correr los tests contra Postgres en local, define `TEST_DATABASE_URL` (se usa una variable
 distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a los tests).
 
+### Con Docker (opcional)
+
+Mismo `uv.lock` y Postgres 17 como en Neon; el job `docker` del CI lo construye, comprueba
+`/health` y pasa la suite dentro del contenedor.
+
+```bash
+docker compose up --build                                  # http://localhost:8000 (migra al arrancar)
+docker compose run --rm web python manage.py ensure_user   # usa PICAPORTE_* de tu .env
+docker compose run --rm web pytest -q                      # tests contra Postgres
+docker compose --profile css up css                        # Tailwind en modo watch
+```
+
 ## Despliegue
 
 1. **Neon** — crea un proyecto (Free, Postgres 17, región `aws-eu-central-1` Frankfurt). Copia
@@ -295,7 +308,8 @@ distinta de `DATABASE_URL` para que un `.env` apuntando a Neon nunca afecte a lo
 `ci.yml` corre en cada push y PR: **lint** (ruff check + format, `uv lock --check`), **tests**
 (pytest contra Postgres 17 con `makemigrations --check`), **deploy-check** (`check --deploy
 --fail-level WARNING` y `collectstatic` con storage manifest, como hace el build de Vercel) y
-**css** (recompila Tailwind y falla si `static/css/app.css` no está al día). `db.yml` migra Neon
+**css** (recompila Tailwind y falla si `static/css/app.css` no está al día) y **docker** (construye
+la imagen de desarrollo, comprueba `/health` contra Postgres y pasa los tests dentro). `db.yml` migra Neon
 tras un CI verde en `main`.
 
 ## Coste de APIs por cada 100 empresas
@@ -330,8 +344,6 @@ llamada); recalcular el `fit_score` al cambiar el perfil no repite ningún fetch
   solo con los datos del directorio.
 - Los *preview deployments* de Vercel comparten la base de datos de producción y están
   protegidos por Vercel Authentication.
-- Docker para desarrollo local llegará en una fase posterior (no había Docker en la máquina de
-  desarrollo para verificarlo).
 
 ## Licencia
 

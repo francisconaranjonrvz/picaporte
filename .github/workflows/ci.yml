@@ -93,3 +93,25 @@ jobs:
         run: |
           python3 scripts/tw.py build
           git diff --stat --exit-code -- static/css/app.css
+
+  docker:
+    name: Docker (desarrollo local)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Construir y arrancar web + Postgres
+        run: docker compose up --build --detach --wait
+      - name: /health responde y ve la base de datos
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health | tee health.json | grep -q '"db": "ok"'; then exit 0; fi
+            sleep 2
+          done
+          cat health.json || true
+          docker compose logs web
+          exit 1
+      - name: Tests dentro del contenedor contra Postgres 17
+        run: docker compose run --rm web pytest -q -p no:cacheprovider --create-db
+      - name: Parar
+        if: always()
+        run: docker compose down --volumes
