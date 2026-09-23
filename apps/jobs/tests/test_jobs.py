@@ -90,6 +90,10 @@ def test_start_discover_crea_job_y_reusa_el_activo(token, monkeypatch):
         lambda wf, inputs: github.DispatchedRun(99, "https://gh/99"),
     )
 
+    monkeypatch.setattr(
+        services.github, "run_state", lambda run_id: github.RunState("in_progress", None, "")
+    )
+
     job = services.start_discover_from_app()
     again = services.start_discover_from_app()
 
@@ -98,6 +102,39 @@ def test_start_discover_crea_job_y_reusa_el_activo(token, monkeypatch):
     assert (job.github_run_id, job.github_run_url) == (99, "https://gh/99")
     assert again.pk == job.pk  # no se lanza otro mientras uno está activo
     assert JobRun.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_start_discover_no_se_bloquea_por_un_job_muerto(token, monkeypatch):
+    """Un job que sigue "activo" pero cuyo run ya terminó (o es muy viejo) no bloquea el botón."""
+    monkeypatch.setattr(
+        services.github,
+        "dispatch_workflow",
+        lambda wf, inputs: github.DispatchedRun(7, "https://gh/7"),
+    )
+    monkeypatch.setattr(
+        services.github, "run_state", lambda run_id: github.RunState("completed", "cancelled", "")
+    )
+    cancelled = JobRun.objects.create(
+        kind=JobRun.Kind.DISCOVER, status=JobRun.Status.RUNNING, github_run_id=5
+    )
+    ancient = JobRun.objects.create(
+        kind=JobRun.Kind.DISCOVER,
+        status=JobRun.Status.RUNNING,
+        created_at=timezone.now() - timedelta(hours=2),
+    )
+
+    # El activo más reciente está cancelado en GitHub: se cierra y se lanza uno nuevo.
+    job = services.start_discover_from_app()
+
+    cancelled.refresh_from_db()
+    assert cancelled.status == JobRun.Status.FAILED
+    assert "cancelled" in cancelled.error
+    assert job.github_run_id == 7
+
+    ancient = services.refresh_from_github(ancient)
+    assert ancient.status == JobRun.Status.FAILED
+    assert "1 h" in ancient.error
 
 
 @pytest.mark.django_db
@@ -161,12 +198,17 @@ def test_explorar_muestra_cifras_y_estado(auth_client, db):
     assert "Aún no hay empresas" in resp.text
     assert "Todavía no se ha buscado" in resp.text
 
-    Company.objects.create(name="Buzz", website="https://buzz.com")
+    buzz = Company.objects.create(name="Buzz", website="https://buzz.com")
     Company.objects.create(name="Cowork")
+    Company.objects.create(name="Retirada", is_active=False)
+    for source, external_id in (("osm", "node/1"), ("foursquare", "fsq/1")):
+        buzz.records.create(source=source, external_id=external_id, name="Buzz")
     resp = auth_client.get(reverse("explorar"))
-    assert "2 empresas" in resp.text
+    assert "2 empresas" in resp.text  # la inactiva no cuenta
     assert "Sin categoría" in resp.text
     assert "1 con web" in resp.text
+    assert "OpenStreetMap 1" in resp.text
+    assert "Foursquare OS Places 1" in resp.text
 
 
 def test_las_rutas_de_jobs_requieren_login(client, db):

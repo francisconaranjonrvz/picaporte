@@ -11,6 +11,9 @@ from .models import JobRun
 
 DISCOVER_WORKFLOW = "discover.yml"
 GITHUB_CHECK_INTERVAL = timedelta(seconds=15)
+# discover.yml corta a los 45 min: un job "activo" más viejo que esto murió sin avisar
+# (p. ej. cancelado) y no debe bloquear el botón.
+STALE_AFTER = timedelta(hours=1)
 
 
 def start_discover_from_app() -> JobRun:
@@ -19,7 +22,9 @@ def start_discover_from_app() -> JobRun:
         kind=JobRun.Kind.DISCOVER, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
     ).first()
     if active is not None:
-        return active
+        active = refresh_from_github(active)
+        if active.is_active:
+            return active
     job = JobRun.objects.create(kind=JobRun.Kind.DISCOVER, trigger=JobRun.Trigger.APP)
     try:
         dispatched = github.dispatch_workflow(DISCOVER_WORKFLOW, {"job_id": str(job.pk)})
@@ -55,6 +60,13 @@ def trigger_from_env(job_id: int | None) -> str:
 
 def refresh_from_github(job: JobRun) -> JobRun:
     """Si el workflow acabó sin que el comando cerrara el JobRun (p. ej. fallo antes de arrancar)."""
+    if job.is_active and timezone.now() - job.created_at > STALE_AFTER:
+        job.mark_finished(
+            stats={},
+            summary="",
+            error="Sin noticias del workflow en más de 1 h: se da por perdido.",
+        )
+        return job
     if not job.is_active or not job.github_run_id or not settings.GITHUB_DISPATCH_TOKEN:
         return job
     if job.github_checked_at and timezone.now() - job.github_checked_at < GITHUB_CHECK_INTERVAL:

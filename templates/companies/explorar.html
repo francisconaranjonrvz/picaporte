@@ -13,7 +13,7 @@
   {% card %}
     <div class="flex items-center justify-between">
       <h2 class="font-bold">Descubrimiento</h2>
-      <span class="badge badge-muted">OSM{% if total %} · {{ total }} empresas{% endif %}</span>
+      {% if total %}<span class="badge badge-muted">{{ total }} empresas</span>{% endif %}
     </div>
     <div class="mt-3">{% include "jobs/_status.html" %}</div>
     <form hx-post="{% url 'job_trigger_discover' %}" hx-target="#job-status" hx-swap="outerHTML" class="mt-3">
@@ -32,9 +32,12 @@
       {% endfor %}
     </ul>
     <p class="mt-2 text-xs text-muted">{{ with_website }} con web · la lista con filtros y mapa llega en la fase 5.</p>
+    {% if by_source %}
+    <p class="mt-1 text-xs text-muted">Fuentes: {% for name, count in by_source %}{{ name }} {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+    {% endif %}
   {% endcard %}
   {% else %}
-  {% include "components/empty_state.html" with icon="compass" title="Aún no hay empresas" text="Pulsa «Buscar nuevas empresas» para lanzar el primer descubrimiento (OpenStreetMap)." %}
+  {% include "components/empty_state.html" with icon="compass" title="Aún no hay empresas" text="Pulsa «Buscar nuevas empresas» para lanzar el primer descubrimiento (OpenStreetMap, Foursquare y el censo de locales de Barcelona)." %}
   {% endif %}
 </div>
 {% endblock %}
