@@ -78,11 +78,10 @@ def test_ingest_sin_categoria_ni_coordenadas(ctx):
 
 
 class FakeAdapter:
-    name = "fake"
-
-    def __init__(self, raws=None, error=None):
+    def __init__(self, raws=None, error=None, name="fake"):
         self.raws = raws or []
         self.error = error
+        self.name = name
 
     def fetch(self):
         if self.error:
@@ -178,3 +177,48 @@ def test_ingesta_por_lotes_no_consulta_por_empresa(ctx, django_assert_max_num_qu
     merged = Company.objects.get(domain="agencia0.example")
     assert set(merged.records.values_list("source", flat=True)) == {"foursquare", "osm"}
     assert merged.confidence_score == services.confidence_score(merged, 2)
+
+
+def test_run_discovery_retira_lo_que_la_fuente_ya_no_devuelve(ctx, monkeypatch):
+    solo_fsq = _raw(source=Source.FOURSQUARE, external_id="fsq/1", name="Cerrada", website="")
+    compartida_osm = _raw(external_id="node/2", name="Compartida", website="https://c.example")
+    compartida_fsq = _raw(
+        source=Source.FOURSQUARE, external_id="fsq/2", website="https://c.example"
+    )
+    sigue = _raw(
+        source=Source.FOURSQUARE, external_id="fsq/3", name="Sigue", website="https://s.ex"
+    )
+    for raw in (solo_fsq, compartida_osm, compartida_fsq, sigue):
+        services.ingest(raw, **ctx)
+
+    adapter = FakeAdapter([sigue], name=Source.FOURSQUARE)
+    monkeypatch.setattr(services, "get_adapters", lambda names: [adapter])
+    results = services.run_discovery(["foursquare"])
+
+    assert results["foursquare"].retired == 2
+    assert not Company.objects.get(name="Cerrada").is_active  # sin fuentes: inactiva, no borrada
+    compartida = Company.objects.get(domain="c.example")
+    assert compartida.is_active  # le queda OSM
+    assert compartida.source_names == ["osm"]
+    assert compartida.confidence_score == services.confidence_score(compartida, 1)
+    assert Company.objects.get(domain="s.ex").is_active
+
+
+def test_fuente_con_error_o_vacia_no_retira_nada(ctx, monkeypatch):
+    services.ingest(_raw(source=Source.FOURSQUARE, external_id="fsq/1"), **ctx)
+    for adapter in (
+        FakeAdapter(error="caída", name=Source.FOURSQUARE),
+        FakeAdapter([], name=Source.FOURSQUARE),
+    ):
+        monkeypatch.setattr(services, "get_adapters", lambda names, a=adapter: [a])
+        results = services.run_discovery(None)
+        assert results["foursquare"].retired == 0
+    assert SourceRecord.objects.count() == 1
+
+
+def test_empresa_retirada_que_reaparece_vuelve_a_estar_activa(ctx):
+    company, _ = services.ingest(_raw(), **ctx)
+    Company.objects.filter(pk=company.pk).update(is_active=False)
+    company, outcome = services.ingest(_raw(), **ctx)
+    assert outcome == "updated:record"
+    assert Company.objects.get(pk=company.pk).is_active

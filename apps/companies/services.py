@@ -23,6 +23,7 @@ class IngestStats:
     updated: int = 0
     matched_by: Counter = field(default_factory=Counter)
     skipped: int = 0
+    retired: int = 0  # registros de la fuente que ya no aparecen
     error: str = ""
 
     def as_dict(self) -> dict:
@@ -32,6 +33,7 @@ class IngestStats:
             "updated": self.updated,
             "matched_by": dict(self.matched_by),
             "skipped": self.skipped,
+            "retired": self.retired,
             "error": self.error,
         }
 
@@ -75,6 +77,7 @@ MUTABLE_FIELDS = [
     "confidence_score",
     "field_sources",
     "last_seen_at",
+    "is_active",
 ]
 FLUSH_EVERY = 500
 
@@ -111,10 +114,12 @@ class Ingestor:
         self._new_records: list[SourceRecord] = []
         self._touched_records: dict[int, SourceRecord] = {}
         self._pending = 0
+        self._seen: set[tuple[str, str]] = set()
 
     def add(self, raw: RawCompany) -> tuple[Company, str]:
         """Fusiona `raw` en memoria. Devuelve (empresa, 'created'|'updated:<criterio>')."""
         key = (raw.source, raw.external_id)
+        self._seen.add(key)
         record = self.records.get(key)
         if record is not None:
             company, how = self.record_company[key], "record"
@@ -129,6 +134,7 @@ class Ingestor:
         merge_into(company, raw, category=self.categories.get(raw.category_slug or ""))
         company.zone = zone_for(company.lat, company.lng, self.zones) or company.zone
         company.last_seen_at = timezone.now()
+        company.is_active = True  # una empresa retirada que reaparece vuelve a la lista
         self.index.add(company)
         if company.pk is not None:
             self._dirty[id(company)] = company
@@ -173,6 +179,34 @@ class Ingestor:
         self._dirty, self._touched_records = {}, {}
         self._pending = 0
 
+    def retire_unseen(self, source: str) -> int:
+        """Tras una lectura completa de `source`, borra sus registros que ya no aparecen.
+
+        Las empresas que se quedan sin ninguna fuente pasan a inactivas (no se borran:
+        pueden tener favoritos o visitas); las demás recalculan su confianza.
+        """
+        self.flush()
+        gone = [key for key in self.records if key[0] == source and key not in self._seen]
+        if not gone:
+            return 0
+        affected: dict[int, Company] = {}
+        record_ids: list[int] = []
+        for key in gone:
+            record = self.records.pop(key)
+            company = self.record_company.pop(key)
+            self.sources[id(company)].discard(source)
+            affected[id(company)] = company
+            record_ids.append(record.pk)
+        for company in affected.values():
+            remaining = len(self.sources[id(company)])
+            company.is_active = remaining > 0
+            company.confidence_score = confidence_score(company, remaining)
+            self._dirty[id(company)] = company
+        with transaction.atomic():
+            SourceRecord.objects.filter(pk__in=record_ids).delete()
+            self.flush()
+        return len(gone)
+
 
 def ingest(
     raw: RawCompany, *, categories: dict[str, Category], zones: list[Zone]
@@ -209,6 +243,11 @@ def run_discovery(
         except SourceError as exc:
             stats.error = str(exc)
             logger.error("Fuente %s: %s", adapter.name, exc)
-        if ingestor is not None:
-            ingestor.flush()
+        if ingestor is None:
+            continue
+        ingestor.flush()
+        # Solo una lectura completa y con resultados autoriza a retirar lo que falta
+        # (una fuente caída o vacía no debe vaciar la base de datos).
+        if not stats.error and stats.fetched:
+            stats.retired = ingestor.retire_unseen(adapter.name)
     return results

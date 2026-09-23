@@ -48,9 +48,12 @@ class Command(BaseCommand):
             if s.error:
                 lines.append(f"{name}: ERROR {s.error}")
             else:
-                lines.append(
+                line = (
                     f"{name}: {s.fetched} encontradas, {s.created} nuevas, {s.updated} actualizadas"
                 )
+                if s.retired:
+                    line += f", {s.retired} retiradas"
+                lines.append(line)
         summary = "\n".join(lines) + (" (dry-run)" if dry_run else "")
         errors = [f"{n}: {s.error}" for n, s in results.items() if s.error]
         all_failed = errors and len(errors) == len(results)
