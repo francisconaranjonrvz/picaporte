@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -172,17 +172,18 @@ def save_crawl(enrichment: Enrichment, outcome: CrawlResult | Exception) -> None
     enrichment.crawled_at = now
     if isinstance(outcome, CrawlResult):
         CompanyPage.objects.filter(company_id=enrichment.company_id).delete()
+        unique = {page.url[:500]: page for page in reversed(outcome.pages)}  # gana la primera
         CompanyPage.objects.bulk_create(
             CompanyPage(
                 company_id=enrichment.company_id,
-                url=page.url[:500],
+                url=url,
                 kind=page.kind,
                 status_code=page.status_code,
                 lang=page.lang,
                 text=page.text,
                 fetched_at=now,
             )
-            for page in outcome.pages
+            for url, page in reversed(unique.items())
         )
         enrichment.crawl_status = Enrichment.CrawlStatus.OK
         enrichment.crawl_error = ""
@@ -209,7 +210,12 @@ def crawl(enrichments: list[Enrichment], stats: EnrichStats, deadline: Deadline,
         for enrichment, outcome in run_concurrently(
             lambda e: crawl_site(websites[e.pk]), batch, workers
         ):
-            save_crawl(enrichment, outcome)
+            try:
+                save_crawl(enrichment, outcome)
+            except DatabaseError as exc:
+                # Un dato raro de una web no debe tumbar el lote entero.
+                logger.warning("No se pudo guardar el rastreo de %s: %s", enrichment.company, exc)
+                save_crawl(enrichment, CrawlError("unreachable", f"Error al guardar: {exc}"))
             stats.crawled += 1
             stats.crawl_status[enrichment.crawl_status] += 1
 

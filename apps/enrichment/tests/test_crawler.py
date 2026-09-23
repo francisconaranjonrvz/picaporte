@@ -180,3 +180,22 @@ def test_paginas_grandes_se_cortan(monkeypatch):
     }
     fetched = Crawler(client=_client(routes), sleep=lambda s: None).get("https://buzz.es/")
     assert len(fetched.content) < len(big)
+
+
+def test_enlaces_que_acaban_en_la_misma_pagina_no_se_repiten():
+    routes = _site()
+    # "Sobre nosotros" redirige a la home: no debe guardarse dos veces.
+    routes["https://buzz.es/es/sobre-nosotros"] = (200, HOME, "text/html")
+
+    def handler(request):
+        url = str(request.url)
+        if url == "https://buzz.es/es/sobre-nosotros":
+            return httpx.Response(301, headers={"location": "https://buzz.es/"})
+        status, body, ctype = routes.get(url, (404, "", "text/html"))
+        return httpx.Response(status, text=body, headers={"content-type": ctype})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    result = Crawler(client=client, sleep=lambda s: None).crawl("https://buzz.es")
+    urls = [p.url for p in result.pages]
+    assert len(urls) == len(set(urls))
+    assert "about" not in [p.kind for p in result.pages]

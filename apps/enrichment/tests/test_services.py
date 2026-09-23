@@ -336,3 +336,38 @@ def test_resumen_de_estadisticas():
         == "webs: 3 rastreadas (2 con contenido)\nIA: 2 analizadas, 5 puntuadas, 1 errores"
     )
     assert stats.as_dict()["crawl_status"] == {"ok": 2}
+
+
+def test_paginas_con_la_misma_url_no_rompen_el_guardado(db):
+    company = _company("Buzz", "https://buzz.es")
+    services.ensure_enrichments()
+    result = _crawl_result()
+    result.pages.append(Page("https://buzz.es/", "about", 200, "duplicada", "es"))
+
+    services.save_crawl(company.enrichment, result)
+
+    assert company.pages.count() == 2
+    assert company.pages.get(url="https://buzz.es/").kind == "home"  # gana la primera
+
+
+def test_un_fallo_al_guardar_no_tumba_el_lote(db, monkeypatch):
+    from django.db import IntegrityError
+
+    ok = _company("Bien", "https://bien.es")
+    bad = _company("Rara", "https://rara.es")
+    services.ensure_enrichments()
+    real_save = services.save_crawl
+
+    def flaky_save(enrichment, outcome):
+        if enrichment.company_id == bad.pk and isinstance(outcome, CrawlResult):
+            raise IntegrityError("duplicate key")
+        return real_save(enrichment, outcome)
+
+    monkeypatch.setattr(services, "save_crawl", flaky_save)
+    monkeypatch.setattr(services, "crawl_site", lambda url: _crawl_result(url))
+    stats = services.EnrichStats()
+    services.crawl(services.select_for_crawl(10), stats, services.Deadline(None), workers=1)
+
+    assert stats.crawled == 2
+    assert Enrichment.objects.get(company=ok).crawl_status == "ok"
+    assert "Error al guardar" in Enrichment.objects.get(company=bad).crawl_error

@@ -290,6 +290,9 @@ class Crawler:
                 continue
             if response.status_code >= 400 or not response.is_html:
                 continue
+            # Dos enlaces pueden acabar en la misma página tras redirecciones (p. ej. a la home).
+            if response.url in {page.url for page in result.pages}:
+                continue
             page_text, page_lang, page_soup = html_to_text(response.content)
             result.pages.append(
                 Page(response.url, kind, response.status_code, page_text, page_lang)
