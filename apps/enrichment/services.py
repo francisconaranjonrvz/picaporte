@@ -249,7 +249,7 @@ def _extract_one(item: tuple[Enrichment, str]):
         user_text=user_text,
         output_model=ExtractedCompany,
         fast=True,
-        max_tokens=2048,
+        max_tokens=4096,  # 2048 se quedaba corto con webs de muchos servicios o clientes
     )
 
 
