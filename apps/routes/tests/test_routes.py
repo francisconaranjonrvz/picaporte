@@ -205,3 +205,16 @@ def test_ubicacion_fuera_de_barcelona_se_rechaza(auth_client, db):
         {"date": "2026-09-22", "slot": "manana", "size": 6, "start_lat": 40.4, "start_lng": -3.7},
     )
     assert resp.status_code == 400
+
+
+def test_los_campos_de_fecha_usan_formato_iso(auth_client, db):
+    """<input type="date"> solo acepta AAAA-MM-DD: con el formato local saldría vacío."""
+    from django.utils import timezone
+
+    html = auth_client.get(reverse("ruta")).text
+    assert f'value="{timezone.localdate().isoformat()}"' in html
+
+    company = _company("Sol", 41.39, 2.16)
+    Visit.objects.create(company=company, next_action_on=date(2026, 10, 1))
+    html = auth_client.get(reverse("ficha", args=[company.pk])).text
+    assert 'value="2026-10-01"' in html

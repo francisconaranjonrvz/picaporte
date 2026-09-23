@@ -8,12 +8,16 @@ class VisitForm(forms.ModelForm):
         model = Visit
         fields = ["visited_on", "contact", "next_action", "next_action_on"]
         widgets = {
-            "visited_on": forms.DateInput(attrs={"type": "date", "class": "field-input"}),
+            "visited_on": forms.DateInput(
+                attrs={"type": "date", "class": "field-input"}, format="%Y-%m-%d"
+            ),
             "contact": forms.TextInput(
                 attrs={"class": "field-input", "placeholder": "Nombre y cargo"}
             ),
             "next_action": forms.TextInput(
                 attrs={"class": "field-input", "placeholder": "Llamar para preguntar por el CV…"}
             ),
-            "next_action_on": forms.DateInput(attrs={"type": "date", "class": "field-input"}),
+            "next_action_on": forms.DateInput(
+                attrs={"type": "date", "class": "field-input"}, format="%Y-%m-%d"
+            ),
         }

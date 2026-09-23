@@ -9,7 +9,8 @@ from .planner import DEFAULT_STOPS, MAX_STOPS, MIN_STOPS
 
 class RouteForm(forms.Form):
     date = forms.DateField(
-        label="Día", widget=forms.DateInput(attrs={"type": "date", "class": "field-input"})
+        label="Día",
+        widget=forms.DateInput(attrs={"type": "date", "class": "field-input"}, format="%Y-%m-%d"),
     )
     slot = forms.ChoiceField(
         label="Franja",
