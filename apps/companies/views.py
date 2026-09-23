@@ -19,7 +19,7 @@ from .models import Company, Source, SourceRecord
 from .opening import opening_for
 
 PAGE_SIZE = 20
-MAP_LIMIT = 600  # marcadores como máximo (el filtro acota; Leaflet va bien con cientos)
+MAP_LIMIT = 1500  # marcadores como máximo (Leaflet en canvas dibuja miles sin problema)
 
 
 def _with_opening(companies, now):

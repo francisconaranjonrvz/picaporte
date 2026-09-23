@@ -44,7 +44,7 @@
     const count = document.getElementById("map-count");
     const css = getComputedStyle(document.documentElement);
     const color = (name) => css.getPropertyValue(`--color-${name}`).trim();
-    const map = L.map(el, { zoomControl: false }).setView([41.395, 2.17], 13);
+    const map = L.map(el, { zoomControl: false, preferCanvas: true }).setView([41.395, 2.17], 13);
     L.control.zoom({ position: "bottomright" }).addTo(map);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
@@ -62,7 +62,7 @@
       for (const p of points) {
         const fill = p.score >= 70 ? color("success-ink") : p.score >= 40 ? color("warning-ink") : color("action-fill");
         L.circleMarker([p.lat, p.lng], {
-          radius: 8, color: p.favorite ? color("danger-ink") : "#fff", weight: p.favorite ? 4 : 2,
+          radius: 6, color: p.favorite ? color("danger-ink") : "#fff", weight: p.favorite ? 4 : 2,
           fillColor: fill, fillOpacity: 0.9,
         })
           .bindPopup(
