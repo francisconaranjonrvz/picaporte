@@ -5,8 +5,9 @@
    entregado, visitada o descartada).
 2. Prioridad: favorita (según su prioridad), encaje con el perfil, estado "volver"
    o "planificado", y próxima acción programada para ese día.
-3. Se eligen las `size` más prioritarias y se ordenan por cercanía: vecino más
-   cercano desde el punto de salida y mejora 2-opt (con ≤ 10 paradas es inmediato).
+3. Se eligen las `size` con más prioridad descontando la distancia al punto de
+   salida (una empresa lejana solo entra si compensa el paseo) y se ordenan por
+   cercanía: vecino más cercano y mejora 2-opt (con ≤ 10 paradas es inmediato).
 """
 
 from dataclasses import dataclass
@@ -30,6 +31,9 @@ FAVORITE_BONUS = {
 STATUS_BONUS = {Visit.Status.RETURN: 20, Visit.Status.PLANNED: 10}
 UNSCORED_FIT = 30  # encaje supuesto para empresas aún sin puntuar
 WALKING_M_PER_MIN = 75  # a paso tranquilo, con semáforos
+# Puntos de prioridad que resta cada km desde la salida: 2 km cuestan lo que ser favorita baja
+# y media, así que una empresa lejana solo entra si es claramente mejor.
+DISTANCE_PENALTY_PER_KM = 12
 
 
 @dataclass
@@ -120,9 +124,13 @@ def plan(
     """(paradas ordenadas, punto de salida). Puede devolver menos de `size` si no hay más."""
     size = max(MIN_STOPS, min(MAX_STOPS, size))
     origin = start or zone_center(zone)
+
+    def adjusted(c: Candidate) -> float:
+        return c.priority - DISTANCE_PENALTY_PER_KM * distance_m(*origin, *c.point) / 1000
+
     pool = sorted(
         candidates(day, slot_times, zone),
-        key=lambda c: (-c.priority, c.company.name),
+        key=lambda c: (-adjusted(c), c.company.name),
     )[:size]
     return order_by_proximity(pool, origin), origin
 

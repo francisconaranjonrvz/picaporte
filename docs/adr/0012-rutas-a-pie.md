@@ -19,8 +19,9 @@ en navegadores móviles**; sin `origin`, sale de la ubicación actual.
   - Prioridad = favorita (alta 45 / media 30 / baja 15) + 0,6 × encaje (30 si aún no hay
     puntuación) + estado "volver" (20) o "planificado" (10) + próxima acción ese día (25) +
     confianza / 20.
-  - Se toman las `size` más prioritarias (6-10) y se ordenan por **vecino más cercano** desde el
-    punto de salida y mejora **2-opt**: óptimo o casi con ≤ 10 paradas y sin coste.
+  - Se toman las `size` (6-10) con más prioridad **descontando 12 puntos por km** desde el punto
+    de salida (probado en producción: sin descuento se colaba una parada a 38 min del resto) y
+    se ordenan por **vecino más cercano** y mejora **2-opt**: óptimo o casi con ≤ 10 paradas.
   - Distancias en línea recta (haversine); el tiempo a pie se estima con 75 m/min y un factor
     1,25 porque las calles no son rectas. Es una estimación, no navegación.
 - **Punto de salida**: la ubicación actual si se permite (validada dentro del área de Barcelona)

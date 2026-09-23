@@ -218,3 +218,17 @@ def test_los_campos_de_fecha_usan_formato_iso(auth_client, db):
     Visit.objects.create(company=company, next_action_on=date(2026, 10, 1))
     html = auth_client.get(reverse("ficha", args=[company.pk])).text
     assert 'value="2026-10-01"' in html
+
+
+def test_una_empresa_lejana_solo_entra_si_compensa(eixample):
+    origin = planner.zone_center(eixample)
+    for i in range(6):
+        _company(f"Cerca {i}", origin[0] + i * 0.001, origin[1], score=60)
+    lejos = _company("Lejos", origin[0] + 0.03, origin[1], score=65)  # ~3,3 km
+
+    stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=6)
+    assert lejos.pk not in {c.company.pk for c in stops}  # +3 de encaje no compensa 3 km
+
+    Favorite.objects.create(company=lejos, priority=Favorite.Priority.HIGH)
+    stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=6)
+    assert lejos.pk in {c.company.pk for c in stops}  # favorita alta: sí compensa
