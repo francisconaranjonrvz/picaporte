@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -79,7 +80,10 @@ def test_abierto_ahora(companies, monkeypatch):
     companies["b"].opening_hours = "Sa 10:00-12:00"
     companies["b"].save()
     tuesday_morning = timezone.make_aware(datetime(2026, 9, 22, 10, 0))
-    monkeypatch.setattr(filters_module.timezone, "localtime", lambda: tuesday_morning)
+    # Solo el reloj del filtro (parchear django.utils.timezone rompería localdate() en otros sitios).
+    monkeypatch.setattr(
+        filters_module, "timezone", SimpleNamespace(localtime=lambda: tuesday_morning)
+    )
     # "Cowork Luna" no publica horario: cuenta el de oficina estimado (abierto un martes a las 10).
     assert _names({"open_now": "on"}) == ["Agencia Sol", "Cowork Luna"]
 

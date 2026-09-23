@@ -7,7 +7,11 @@
     <h1 class="text-2xl font-extrabold tracking-tight">Explorar</h1>
     <p class="text-sm text-muted">{{ total_active }} empresas de Barcelona donde llamar a la puerta.</p>
   </div>
-  {% btn href=datos_url variant="ghost" size="sm" aria_label="Estado de los datos" %}{% icon "database" "size-4" %}Datos{% endbtn %}
+  {% url "ofertas" as ofertas_url %}
+  <div class="flex shrink-0 gap-1">
+    {% btn href=ofertas_url variant="ghost" size="sm" aria_label="Ofertas de empleo" %}{% icon "sparkles" "size-4" %}Ofertas{% endbtn %}
+    {% btn href=datos_url variant="ghost" size="sm" aria_label="Estado de los datos" %}{% icon "database" "size-4" %}Datos{% endbtn %}
+  </div>
 </header>
 
 <form id="filters" action="{% url 'explorar' %}" method="get"
@@ -24,16 +28,16 @@
   </div>
 
   <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-    {% for field in form %}{% if field.name == "open_now" or field.name == "favorites" %}
+    {% for field in form %}{% if field.name == "open_now" or field.name == "favorites" or field.name == "offers" %}
     <label class="chip shrink-0 cursor-pointer has-[:checked]:border-action-fill has-[:checked]:bg-action-fill has-[:checked]:text-white">
       <input type="checkbox" name="{{ field.html_name }}" value="on" class="sr-only"{% if field.value %} checked{% endif %}>
-      {% if field.name == "open_now" %}{% icon "clock" "size-4" %}{% else %}{% icon "heart" "size-4" %}{% endif %}{{ field.label }}
+      {% if field.name == "open_now" %}{% icon "clock" "size-4" %}{% elif field.name == "offers" %}{% icon "sparkles" "size-4" %}{% else %}{% icon "heart" "size-4" %}{% endif %}{{ field.label }}
     </label>
     {% endif %}{% endfor %}
   </div>
 
   <div id="filter-panel" x-show="open" x-cloak x-transition.duration.150ms class="card grid grid-cols-2 gap-3">
-    {% for field in form %}{% if field.name != "q" and field.name != "open_now" and field.name != "favorites" %}
+    {% for field in form %}{% if field.name != "q" and field.name != "open_now" and field.name != "favorites" and field.name != "offers" %}
     <div class="{% if field.name == 'sort' %}col-span-2{% endif %}">
       <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
       <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="field-input px-3 text-sm">

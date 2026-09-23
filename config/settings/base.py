@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.enrichment",
     "apps.tracking",
     "apps.routes",
+    "apps.offers",
 ]
 
 MIDDLEWARE = [

@@ -22,6 +22,7 @@
       {% icon "clock" "size-3.5" %}{% if company.open_now %}Abierto{% else %}Cerrado{% endif %}{% if company.opening.estimated %}*{% endif %}
     </span>
     {% if e.requires_catalan == "si" %}<span class="badge badge-primary">Catalán</span>{% endif %}
+    {% if company.has_offers %}<span class="badge badge-success">{% icon "sparkles" "size-3.5" %}Ofertas activas</span>{% endif %}
     {% if e.hiring_note %}<span class="badge badge-success">{% icon "sparkles" "size-3.5" %}Contratando</span>{% endif %}
     <span class="ml-auto flex gap-1">
       {% if company.tel_url %}<a href="{{ company.tel_url }}" class="flex size-9 items-center justify-center rounded-full bg-primary/50 text-action-fill" aria-label="Llamar a {{ company.name }}">{% icon "phone" "size-4" %}</a>{% endif %}

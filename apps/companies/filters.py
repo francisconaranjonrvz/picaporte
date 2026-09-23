@@ -1,10 +1,11 @@
 """Filtros de la lista de Explorar y del mapa (mismos parámetros GET en ambos)."""
 
 from django import forms
-from django.db.models import F, Q, QuerySet
+from django.db.models import Exists, F, OuterRef, Q, QuerySet
 from django.utils import timezone
 
 from apps.catalog.models import Category, Zone
+from apps.offers.models import active_offers
 from apps.tracking.models import Visit
 
 from .models import Company
@@ -46,6 +47,7 @@ class CompanyFilter(forms.Form):
     confidence = forms.ChoiceField(required=False, choices=CONFIDENCE_CHOICES, label="Confianza")
     open_now = forms.BooleanField(required=False, label="Abierto ahora")
     favorites = forms.BooleanField(required=False, label="Solo favoritas")
+    offers = forms.BooleanField(required=False, label="Con ofertas")
     sort = forms.ChoiceField(required=False, choices=SORT_CHOICES, label="Orden")
 
     def __init__(self, *args, **kwargs):
@@ -92,6 +94,8 @@ class CompanyFilter(forms.Form):
             qs = qs.filter(confidence_score__gte=int(data["confidence"]))
         if data["favorites"]:
             qs = qs.filter(favorite__isnull=False)
+        if data["offers"]:
+            qs = qs.filter(has_offers=True)
         qs = qs.order_by(*ORDERINGS[data["sort"] or "encaje"])
         if data["open_now"]:
             now = timezone.localtime()
@@ -107,6 +111,8 @@ ORDERINGS = {
 
 
 def base_queryset() -> QuerySet[Company]:
-    return Company.objects.filter(is_active=True).select_related(
-        "category", "zone", "enrichment", "visit", "favorite"
+    return (
+        Company.objects.filter(is_active=True)
+        .select_related("category", "zone", "enrichment", "visit", "favorite")
+        .annotate(has_offers=Exists(active_offers().filter(company=OuterRef("pk"))))
     )

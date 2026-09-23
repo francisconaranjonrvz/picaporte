@@ -11,6 +11,7 @@ from apps.enrichment.models import Enrichment
 from apps.enrichment.profile import current_profile, profile_is_usable, stale_scores_count
 from apps.jobs.models import JobRun
 from apps.jobs.views import latest
+from apps.offers.models import active_offers
 from apps.tracking.forms import VisitForm
 from apps.tracking.models import Visit
 
@@ -109,6 +110,7 @@ def ficha(request, pk):
         "open_now": opening.is_open(now),
         "today_label": opening.today_label(now),
         "notes": company.notes.all()[:50],
+        "offers": active_offers().filter(company=company)[:10],
         "sources": [Source(s).label for s in dict.fromkeys(company.source_names)],
         "statuses": Visit.Status.choices,
         "form": VisitForm(instance=getattr(company, "visit", None)),

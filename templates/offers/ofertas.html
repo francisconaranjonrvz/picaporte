@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<header class="mb-4 flex items-start gap-3">
+  <a href="{% url 'explorar' %}" class="flex size-11 shrink-0 items-center justify-center rounded-full bg-surface shadow-soft" aria-label="Volver a Explorar">{% icon "arrow-left" "size-5" %}</a>
+  <div>
+    <h1 class="text-2xl font-extrabold tracking-tight">Ofertas</h1>
+    <p class="text-sm text-muted">Las ofertas de career-ops, cruzadas con las empresas de Picaporte.</p>
+  </div>
+</header>
+
+<div class="space-y-4">
+  {% card %}
+    <h2 class="font-bold">Importar</h2>
+    <form method="post" action="{% url 'ofertas_importar' %}" enctype="multipart/form-data" class="mt-2 space-y-3">
+      {% csrf_token %}
+      <input type="file" name="file" id="offers-file" required accept=".tsv,.csv,.json,text/csv,application/json"
+             class="block w-full text-sm file:mr-3 file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:font-semibold file:text-ink">
+      <p class="field-help">{{ form.file.help_text }} Reimportar actualiza, no duplica.</p>
+      <button type="submit" class="btn-primary w-full">{% icon "upload" "size-5" %}Importar ofertas</button>
+    </form>
+  {% endcard %}
+
+  {% if counts.total %}
+  {% card %}
+    <dl class="grid grid-cols-3 gap-2 text-center">
+      <div><dt class="text-xs text-muted">Importadas</dt><dd class="text-xl font-extrabold">{{ counts.total }}</dd></div>
+      <div><dt class="text-xs text-muted">Activas (45 días)</dt><dd class="text-xl font-extrabold">{{ counts.active }}</dd></div>
+      <div><dt class="text-xs text-muted">En tus empresas</dt><dd class="text-xl font-extrabold text-success-ink">{{ counts.matched }}</dd></div>
+    </dl>
+    <form method="post" action="{% url 'ofertas_recruzar' %}" class="mt-3">
+      {% csrf_token %}
+      <button type="submit" class="w-full text-center text-sm font-semibold text-action-fill">Volver a cruzar con las empresas actuales</button>
+    </form>
+  {% endcard %}
+
+  <nav class="-mx-4 flex gap-2 overflow-x-auto px-4" aria-label="Filtrar ofertas">
+    {% for key, label in filters %}
+    <a href="?ver={{ key }}" class="chip shrink-0" aria-pressed="{% if key == current %}true{% else %}false{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  <ul class="space-y-3">
+    {% for offer in page.object_list %}
+    <li class="card">
+      <a href="{{ offer.url }}" target="_blank" rel="noopener" class="font-bold text-action-fill">{{ offer.title }}</a>
+      <p class="mt-0.5 text-sm">
+        {% if offer.company %}<a href="{% url 'ficha' offer.company_id %}" class="font-semibold underline-offset-2 hover:underline">{{ offer.company.name }}</a>
+        <span class="badge badge-success ml-1">{{ offer.get_match_display }}</span>
+        {% else %}{{ offer.company_name }} <span class="badge badge-muted ml-1">sin empresa en Picaporte</span>{% endif %}
+      </p>
+      <p class="mt-1 text-xs text-muted">{{ offer.portal|default:"—" }}{% if offer.location %} · {{ offer.location }}{% endif %}{% if offer.published_on %} · {{ offer.published_on|date:"j M Y" }}{% endif %}{% if offer.score is not None %} · puntuación {{ offer.score }}{% endif %}</p>
+    </li>
+    {% empty %}
+    <li>{% include "components/empty_state.html" with icon="sparkles" title="Nada con este filtro" text="Las ofertas activas son las vistas en los últimos 45 días." %}</li>
+    {% endfor %}
+  </ul>
+  {% if page.has_other_pages %}
+  <nav class="flex justify-between text-sm font-semibold" aria-label="Páginas">
+    {% if page.has_previous %}<a class="text-action-fill" href="?ver={{ current }}&page={{ page.previous_page_number }}">← Anteriores</a>{% else %}<span></span>{% endif %}
+    <span class="text-muted">{{ page.number }} / {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="text-action-fill" href="?ver={{ current }}&page={{ page.next_page_number }}">Siguientes →</a>{% else %}<span></span>{% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+    {% include "components/empty_state.html" with icon="sparkles" title="Aún no hay ofertas" text="Importa data/scan-history.tsv de career-ops (o un CSV/JSON) para ver qué empresas de Picaporte tienen ofertas activas." %}
+  {% endif %}
+</div>
+{% endblock %}

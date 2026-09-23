@@ -67,6 +67,21 @@
     </div>
   {% endcard %}
 
+  {% if offers %}
+  {% card %}
+    <h2 class="flex items-center gap-2 font-bold">{% icon "sparkles" "size-5 text-success-ink" %}Ofertas activas</h2>
+    <ul class="mt-2 divide-y divide-primary/40 text-sm">
+      {% for offer in offers %}
+      <li class="py-2">
+        <a href="{{ offer.url }}" target="_blank" rel="noopener" class="font-semibold text-action-fill">{{ offer.title }}</a>
+        <span class="block text-xs text-muted">{{ offer.portal|default:"—" }}{% if offer.published_on %} · {{ offer.published_on|date:"j M" }}{% endif %}{% if offer.location %} · {{ offer.location }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="mt-2 text-xs text-muted">Importadas de career-ops. Aunque tengan ofertas, entregar el CV en mano sigue sumando.</p>
+  {% endcard %}
+  {% endif %}
+
   {# Lo que dice su web (IA) #}
   {% if enrichment.extracted_at %}
   {% card %}

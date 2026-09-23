@@ -18,7 +18,7 @@ hosting **0 €**.
 | ✅ Hecha | **4 · Enriquecimiento**: rastreo educado de la web (≤ 5 páginas, robots.txt, pausas), extracción y puntuación de encaje con IA gratuita en dos etapas (Pydantic, prompts versionados, caché por hash), gancho para presentarse, "Recalcular encaje" al cambiar el perfil sin volver a leer webs; cada noche en Actions (ADR 0010) |
 | ✅ Hecha | **5 · UI principal**: Explorar con filtros (encaje, categoría, zona, estado, abierto ahora, catalán, confianza, favoritas) y paginación HTMX, Mapa (Leaflet), ficha con acciones de un toque, Favoritas con prioridad y arrastrar para ordenar, estados, notas y próximas acciones (ADR 0011) |
 | ✅ Hecha | **6 · Ruta**: día, zona y franja → 6-10 empresas abiertas priorizando favoritas y encaje, ordenadas a pie (vecino más cercano + 2-opt), enlace de Google Maps (y por tramos para el navegador móvil) y modo ruta para marcar paradas (ADR 0012) |
-| ⏳ Pendiente | 7 · Ofertas (import desde career-ops) |
+| ✅ Hecha | **7 · Ofertas**: importación del `scan-history.tsv` de career-ops (o CSV/JSON), cruce con las empresas por dominio, nombre o parecido estricto, filtro e insignia "ofertas activas" en Explorar y lista en la ficha (ADR 0013) |
 
 ## Arquitectura
 
@@ -79,6 +79,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0013](docs/adr/0013-ofertas-de-career-ops.md) | **Ofertas de career-ops**: importador con detección de formato (TSV de career-ops, CSV, JSON), upsert por URL, cruce dominio → nombre → difuso estricto ignorando portales y ATS, activas = últimos 45 días |
 | [0012](docs/adr/0012-rutas-a-pie.md) | **Rutas a pie** sin APIs de pago: planificador propio (prioridad + vecino más cercano + 2-opt), enlaces `dir/?api=1` con ≤ 9 paradas y tramos de 3 para navegadores móviles; proponer no cambia estados, marcar sí y deshacer restaura |
 | [0011](docs/adr/0011-ui-principal-y-seguimiento.md) | **UI principal**: un formulario de filtros para lista y mapa, HTMX para parciales y acciones de un toque, horario OSM + horario de oficina estimado para "abierto ahora", Leaflet y SortableJS vendorizados, seguimiento con `Favorite`/`Visit`/`Note` |
 | [0010](docs/adr/0010-enriquecimiento-en-dos-etapas.md) | **Enriquecimiento en dos etapas**: rastreo propio y educado que guarda solo texto; *extracción* (depende de la web) y *puntuación* por lotes (perfil + empresa) con prompts versionados; cambiar el perfil solo repite la puntuación; modelo de volumen `LLM_MODEL_FAST`; cada noche en Actions con presupuesto de tiempo |
@@ -98,6 +99,7 @@ apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter 
 apps/enrichment/   Enrichment + CompanyPage · crawler.py (robots, ≤ 5 páginas) · services.py (extracción y puntuación) · profile.py (lo que usa la web) · enrich
 apps/tracking/     Favorite, Visit, Note · acciones de un toque (HTMX) y pestaña Favoritas
 apps/routes/       Route, RouteStop · planner.py (candidatas, prioridad, orden a pie) · enlaces de Google Maps · modo ruta
+apps/offers/       JobOffer · importers.py (career-ops, CSV, JSON) · cruce con empresas · import_offers
 apps/jobs/         JobRun + cliente de la API de GitHub (dispatch de workflows y estado)
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
@@ -108,7 +110,7 @@ docs/adr/          decisiones de arquitectura
 .github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml
 ```
 
-Estructura prevista para la fase 7: `apps/offers`. `apps/core` se mantiene transversal.
+`apps/core` se mantiene transversal (health, pestañas comunes, styleguide, PWA).
 
 ### Descubrimiento de empresas (fase 3)
 
@@ -132,6 +134,15 @@ Estructura prevista para la fase 7: `apps/offers`. `apps/core` se mantiene trans
    - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
 5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
    fuentes pasan a inactivas (no se borran).
+
+### Ofertas (fase 7)
+
+- En **Explorar → Ofertas** se sube `data/scan-history.tsv` de career-ops (o un CSV/JSON con
+  título, empresa y url). Solo entran las filas `added`; reimportar actualiza sin duplicar.
+  También: `uv run python manage.py import_offers ruta/al/scan-history.tsv`.
+- Cada oferta se cruza con las empresas: dominio de la URL (salvo portales y ATS), nombre exacto
+  normalizado o parecido estricto. Las activas (últimos 45 días) dan la insignia **Ofertas
+  activas**, el filtro "Con ofertas" de Explorar y una lista en la ficha.
 
 ### Ruta del día (fase 6)
 
