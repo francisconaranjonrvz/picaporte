@@ -147,3 +147,34 @@ def test_comando_rechaza_fuentes_desconocidas(db):
     with pytest.raises(CommandError, match="desconocidas"):
         call_command("discover", sources="osm,google")
     assert "osm" in ADAPTERS
+
+
+def test_ingesta_por_lotes_no_consulta_por_empresa(ctx, django_assert_max_num_queries):
+    # Empresas previas con categoría y zona: leerlas no debe disparar consultas por fila.
+    for i in range(5):
+        services.ingest(_raw(external_id=f"node/{i}", name=f"Previa {i}", website=""), **ctx)
+    raws = [
+        _raw(
+            source=Source.FOURSQUARE,
+            external_id=f"fsq/{i}",
+            name=f"Agencia {i}",
+            website=f"https://agencia{i}.example",
+            lat=41.39 + i * 0.001,
+        )
+        for i in range(60)
+    ]
+    # Mismo lugar dos veces en el lote: la segunda debe fusionarse con la primera (aún sin guardar).
+    raws.append(_raw(source=Source.OSM, external_id="node/x", website="https://agencia0.example"))
+
+    # 2 cargas + 3 volcados (savepoint, inserts, update): constante, no crece con las filas.
+    with django_assert_max_num_queries(16):
+        ingestor = services.Ingestor(flush_every=25, **ctx)
+        outcomes = [ingestor.add(raw)[1] for raw in raws]
+        ingestor.flush()
+
+    assert outcomes.count("created") == 60
+    assert outcomes[-1] == "updated:domain"
+    assert Company.objects.count() == 65
+    merged = Company.objects.get(domain="agencia0.example")
+    assert set(merged.records.values_list("source", flat=True)) == {"foursquare", "osm"}
+    assert merged.confidence_score == services.confidence_score(merged, 2)

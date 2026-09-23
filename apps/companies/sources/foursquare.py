@@ -18,7 +18,7 @@ import os
 import re
 from collections import Counter
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import date, timedelta
 
 from ..http import FetchError, fetch
 from ..models import Source
@@ -30,12 +30,17 @@ DATASET = "foursquare/fsq-os-places"
 RELEASES_API = f"https://huggingface.co/api/datasets/{DATASET}/tree/main/release"
 # Mismo bbox que Overpass: (sur, oeste, norte, este).
 BBOX = (41.32, 2.05, 41.47, 2.23)
+# Lugares que Foursquare no ha refrescado en este tiempo suelen estar cerrados sin marcar.
+MAX_AGE = timedelta(days=3 * 365)
 
 # (patrón sobre la hoja de la etiqueta, slug de categoría). Gana la primera regla que encaje.
 CATEGORY_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"cowork", re.I), "coworkings"),
     (re.compile(r"advertis", re.I), "publicidad"),
-    (re.compile(r"public relations|media agency|\bcommunications\b", re.I), "comunicacion"),
+    (
+        re.compile(r"public relations|media agency|communications (agency|firm)", re.I),
+        "comunicacion",
+    ),
     (re.compile(r"marketing", re.I), "marketing-digital"),
     (re.compile(r"event (service|plann|management)", re.I), "eventos"),
     (
@@ -97,6 +102,15 @@ def _website(value: str | None) -> str:
     if value and not value.startswith(("http://", "https://")):
         value = f"https://{value}"
     return value
+
+
+def is_stale(row: dict, today: date | None = None) -> bool:
+    refreshed = row.get("date_refreshed")
+    if refreshed is None:
+        return False
+    if isinstance(refreshed, str):
+        refreshed = date.fromisoformat(refreshed[:10])
+    return (today or date.today()) - refreshed > MAX_AGE
 
 
 def row_to_raw(row: dict) -> RawCompany | None:
@@ -178,8 +192,17 @@ class FoursquareAdapter:
         leaves = Counter(
             (row.get("fsq_category_labels") or ["?"])[0].rsplit(">", 1)[-1].strip() for row in rows
         )
-        logger.info("Foursquare: %d lugares; etiquetas: %s", len(rows), dict(leaves.most_common()))
+        stale = sum(is_stale(row) for row in rows)
+        logger.info(
+            "Foursquare: %d lugares (%d sin actualizar en %d años, descartados); etiquetas: %s",
+            len(rows),
+            stale,
+            MAX_AGE.days // 365,
+            dict(leaves.most_common()),
+        )
         for row in rows:
+            if is_stale(row):
+                continue
             raw = row_to_raw(row)
             if raw is not None:
                 yield raw

@@ -9,6 +9,8 @@ procedencia en `Company.field_sources`.
 import math
 import re
 import unicodedata
+from collections import defaultdict
+from collections.abc import Iterable
 from urllib.parse import urlsplit
 
 from rapidfuzz import fuzz
@@ -60,11 +62,76 @@ def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
-def find_match(raw: RawCompany) -> tuple[Company | None, str]:
+def _cell(lat: float, lng: float) -> tuple[int, int]:
+    return (math.floor(lat / DEGREE_MARGIN), math.floor(lng / DEGREE_MARGIN))
+
+
+class DbIndex:
+    """Candidatos consultando la BD (una consulta por búsqueda): para ingestas sueltas."""
+
+    def by_domain(self, domain: str) -> list[Company]:
+        return list(Company.objects.filter(domain=domain))
+
+    def nearby(self, lat: float, lng: float) -> list[Company]:
+        return list(
+            Company.objects.filter(
+                lat__gte=lat - DEGREE_MARGIN,
+                lat__lte=lat + DEGREE_MARGIN,
+                lng__gte=lng - DEGREE_MARGIN,
+                lng__lte=lng + DEGREE_MARGIN,
+            )
+        )
+
+
+class MemoryIndex:
+    """Candidatos en memoria (dominio + rejilla de ~200 m) para ingestas por lotes.
+
+    Se carga una vez y se mantiene al día con `add()`, de modo que una empresa creada
+    en el mismo lote ya cuenta para las siguientes.
+    """
+
+    def __init__(self, companies: Iterable[Company] = ()):
+        self._domain: dict[str, list[Company]] = defaultdict(list)
+        self._grid: dict[tuple[int, int], list[Company]] = defaultdict(list)
+        for company in companies:
+            self.add(company)
+
+    @classmethod
+    def load(cls) -> "MemoryIndex":
+        return cls(Company.objects.all())
+
+    @staticmethod
+    def _put(bucket: list[Company], company: Company) -> None:
+        if not any(existing is company for existing in bucket):
+            bucket.append(company)
+
+    def add(self, company: Company) -> None:
+        """Indexa (o reindexa tras una fusión que cambie dominio o coordenadas)."""
+        if company.domain:
+            self._put(self._domain[company.domain], company)
+        if company.lat is not None and company.lng is not None:
+            self._put(self._grid[_cell(company.lat, company.lng)], company)
+
+    def by_domain(self, domain: str) -> list[Company]:
+        return list(self._domain.get(domain, ()))
+
+    def nearby(self, lat: float, lng: float) -> list[Company]:
+        row, col = _cell(lat, lng)
+        found: list[Company] = []
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                found.extend(self._grid.get((row + dr, col + dc), ()))
+        return found
+
+
+def find_match(
+    raw: RawCompany, index: DbIndex | MemoryIndex | None = None
+) -> tuple[Company | None, str]:
     """Devuelve (empresa, criterio) o (None, '') si no hay coincidencia."""
+    index = index or DbIndex()
     domain = normalize_domain(raw.website)
     if domain:
-        by_domain = list(Company.objects.filter(domain=domain))
+        by_domain = index.by_domain(domain)
         if by_domain:
             if raw.lat is not None and raw.lng is not None:
                 by_domain.sort(key=lambda c: _distance_or_inf(c, raw))
@@ -72,14 +139,8 @@ def find_match(raw: RawCompany) -> tuple[Company | None, str]:
 
     if raw.lat is None or raw.lng is None:
         return None, ""
-    nearby = Company.objects.filter(
-        lat__gte=raw.lat - DEGREE_MARGIN,
-        lat__lte=raw.lat + DEGREE_MARGIN,
-        lng__gte=raw.lng - DEGREE_MARGIN,
-        lng__lte=raw.lng + DEGREE_MARGIN,
-    )
     best, best_score = None, 0.0
-    for company in nearby:
+    for company in index.nearby(raw.lat, raw.lng):
         if _distance_or_inf(company, raw) > MAX_DISTANCE_M:
             continue
         score = name_similarity(company.name, raw.name)

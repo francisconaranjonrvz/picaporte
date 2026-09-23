@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 
@@ -9,6 +10,7 @@ from apps.companies.sources.foursquare import (
     LABEL_REGEX,
     FoursquareAdapter,
     category_for_labels,
+    is_stale,
     latest_release,
     places_glob,
     row_to_raw,
@@ -33,8 +35,9 @@ BPS = "Business and Professional Services"
         ([f"{BPS} > Design Studio"], "diseno"),
         # La hoja manda: una categoría hija de "Event" no es una agencia de eventos.
         (["Event > Entertainment Event"], None),
-        # "Telecommunications" no es comunicación.
+        # "Telecommunications" o un edificio universitario no son comunicación.
         ([f"{BPS} > Technology Business > Telecommunications Service"], None),
+        (["Community and Government > Education > College Communications Building"], None),
         (["Dining and Drinking > Restaurant"], None),
         # Si la principal no encaja, se prueba la secundaria.
         (["Retail > Print Store", f"{BPS} > Advertising Agency"], "publicidad"),
@@ -90,6 +93,14 @@ def test_web_con_esquema_se_respeta_y_localidad_vacia_es_barcelona():
     assert raw.city == "Barcelona"
 
 
+def test_lugar_sin_refrescar_en_tres_anos_es_obsoleto():
+    today = date(2026, 9, 23)
+    assert not is_stale({"date_refreshed": date(2025, 1, 1)}, today)
+    assert is_stale({"date_refreshed": date(2023, 1, 1)}, today)
+    assert is_stale({"date_refreshed": "2020-05-01"}, today)
+    assert not is_stale({"date_refreshed": None}, today)
+
+
 def _write_parquet(path, rows):
     con = duckdb.connect()
     con.execute(
@@ -130,6 +141,7 @@ def test_adaptador_filtra_bbox_cerradas_y_categorias_sobre_parquet(tmp_path):
             ROW,
             {**ROW, "fsq_place_id": "madrid", "latitude": 40.4, "longitude": -3.7},
             {**ROW, "fsq_place_id": "cerrada", "date_closed": "2025-01-01"},
+            {**ROW, "fsq_place_id": "vieja", "date_refreshed": "2019-01-01"},
             {**ROW, "fsq_place_id": "bar", "fsq_category_labels": ["Dining and Drinking > Bar"]},
             {
                 **ROW,

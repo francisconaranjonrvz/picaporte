@@ -87,3 +87,38 @@ def test_errores_de_red_se_traducen(fake_http):
 
     with pytest.raises(chttp.FetchError, match="boom"):
         chttp.fetch("https://api.example/x")
+
+
+ROBOTS = """User-agent: *
+Disallow: /api/
+Disallow: /*?query=
+"""
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "url", "allowed"),
+    [
+        (200, ROBOTS, "https://x.es/publicidad/barcelona-es", True),
+        (200, ROBOTS, "https://x.es/api/agencies", False),
+        (404, "", "https://x.es/api/agencies", True),  # sin robots.txt: permitido
+        (503, "", "https://x.es/publicidad", False),  # servidor caído: por prudencia, no
+    ],
+)
+def test_robots_allows(monkeypatch, status, body, url, allowed):
+    requested = []
+
+    def fake_fetch(robots_url, **kwargs):
+        requested.append((robots_url, kwargs.get("accept")))
+        return chttp.Fetched(status, body, False)
+
+    monkeypatch.setattr(chttp, "fetch", fake_fetch)
+    assert chttp.robots_allows(url) is allowed
+    assert requested == [("https://x.es/robots.txt", "text/plain")]
+
+
+def test_robots_allows_sin_red_es_no(monkeypatch):
+    def fail(*args, **kwargs):
+        raise chttp.FetchError("dns")
+
+    monkeypatch.setattr(chttp, "fetch", fail)
+    assert chttp.robots_allows("https://x.es/a") is False
