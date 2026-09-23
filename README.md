@@ -123,8 +123,8 @@ Estructura prevista para las fases 4-7: `apps/enrichment`, `apps/tracking` (Favo
    - **Foursquare OS Places**: DuckDB consulta el parquet de Hugging Face por HTTP (`hf://`,
      ~16 s) filtrando bbox, locales abiertos y etiquetas del sector; descarta lugares sin
      refrescar en 3 años. Requiere `HF_TOKEN` y aceptar las condiciones del dataset.
-   - **Censo de locales en planta baixa** (Open Data BCN): locales a pie de calle con dirección
-     y coordenadas; categoría por palabras clave en el nombre.
+   - **Censo de locales en planta baixa** (Open Data BCN, API DataStore de CKAN): locales a pie
+     de calle con dirección y coordenadas; categoría por palabras clave en el nombre.
    - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
 5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
    fuentes pasan a inactivas (no se borran).
@@ -246,7 +246,7 @@ tras un CI verde en `main`.
 |----------|:-:|:-:|:-:|
 | Overpass API (OSM) | 1 consulta (toda Barcelona, caché 7 días) | gratis (ODbL) | 0 € |
 | Foursquare OS Places | 1 consulta DuckDB por ejecución (~16 s, solo columnas y bloques filtrados) | gratis (Apache 2.0, token HF) | 0 € |
-| Open Data BCN (censo de locales) | 1 descarga CSV (~25 MB) por ejecución | gratis (CC-BY 4.0) | 0 € |
+| Open Data BCN (censo de locales) | 1 + 3 peticiones a la API CKAN (caché 7 días) | gratis (CC-BY 4.0) | 0 € |
 | Google Places | descartado (ADR 0009) | — | — |
 | Directorios sectoriales | descartados (anti-bot, ADR 0009) | — | — |
 | Fetch de webs (≤ 5 páginas/dominio) | ≤ 500 | gratis | 0 € |

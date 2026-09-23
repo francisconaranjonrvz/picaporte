@@ -6,30 +6,45 @@ Las actividades son gruesas ("Serveis a les empreses i oficines"), así que la
 categoría se deduce de palabras clave en el nombre del local, solo dentro de
 las actividades donde viven agencias y estudios.
 
-Se toma la edición más reciente vía la API CKAN del portal. El CSV (~25 MB)
-no se cachea en la BD: se lee en streaming y solo se guardan las coincidencias.
+Se toma la edición más reciente vía la API CKAN del portal y se consulta su
+DataStore (`datastore_search`) filtrando en el servidor por actividad y pidiendo
+solo las columnas útiles: ~2.500 filas en 3 páginas, cacheadas en la BD.
+(La descarga directa del CSV redirige a un desafío anti-bot desde las IPs de
+GitHub Actions; la API no.)
 Sustituye a los directorios sectoriales (Sortlist, Clutch, Páginas Amarillas),
 que responden con desafíos anti-bot (ADR 0009).
 """
 
-import csv
+import json
 import logging
 import re
 from collections.abc import Iterable, Iterator
 from datetime import timedelta
+from urllib.parse import urlencode
 
-import httpx
-
-from ..http import USER_AGENT, FetchError, fetch
+from ..http import FetchError, fetch
 from ..models import Source
 from .base import RawCompany, SourceError
 
 logger = logging.getLogger(__name__)
 
-PACKAGE_API = (
-    "https://opendata-ajuntament.barcelona.cat/data/api/3/action/package_show"
-    "?id=cens-locals-planta-baixa-act-economica"
-)
+API = "https://opendata-ajuntament.barcelona.cat/data/api/3/action"
+PACKAGE_API = f"{API}/package_show?id=cens-locals-planta-baixa-act-economica"
+PAGE_SIZE = 1000
+FIELDS = [
+    "ID_Global",
+    "Codi_Activitat_2022",
+    "Nom_Activitat",
+    "Nom_Local",
+    "Latitud",
+    "Longitud",
+    "Nom_Via",
+    "Num_Policia_Inicial",
+    "Num_Policia_Final",
+    "Nom_Barri",
+    "Nom_Districte",
+    "Data_Revisio",
+]
 # Actividades del censo (Codi_Activitat_2022) donde hay agencias, estudios y productoras.
 ACTIVITY_CODES = {
     "1600400",  # Serveis a les empreses i oficines
@@ -55,26 +70,56 @@ def category_for_name(name: str) -> str | None:
     return None
 
 
-def latest_csv_url() -> str:
-    """URL del CSV de la edición más reciente (los recursos empiezan por el año)."""
+def _api(url: str) -> dict:
+    """GET a la API CKAN (con caché) y devuelve `result`; cualquier anomalía es SourceError."""
     try:
-        response = fetch(PACKAGE_API, ttl=timedelta(days=1), timeout=30)
+        response = fetch(url, ttl=timedelta(days=7), timeout=60)
     except FetchError as exc:
         raise SourceError(f"Open Data BCN no responde: {exc}") from exc
     if response.status_code != 200:
         raise SourceError(f"Open Data BCN respondió {response.status_code}.")
     try:
-        resources = response.json()["result"]["resources"]
-    except (ValueError, KeyError, TypeError) as exc:
+        body = response.json()
+        if not body.get("success"):
+            raise KeyError("success")
+        return body["result"]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise SourceError("Open Data BCN: respuesta CKAN inesperada.") from exc
-    csvs = [
+
+
+def latest_resource_id() -> str:
+    """Recurso de la edición más reciente cargado en el DataStore (los nombres empiezan por el año)."""
+    resources = [
         r
-        for r in resources
-        if (r.get("format") or "").upper() == "CSV" and (r.get("name") or "")[:4].isdigit()
+        for r in _api(PACKAGE_API).get("resources", [])
+        if r.get("datastore_active") and (r.get("name") or "")[:4].isdigit()
     ]
-    if not csvs:
-        raise SourceError("Open Data BCN: el censo no tiene ningún CSV.")
-    return max(csvs, key=lambda r: r["name"])["url"]
+    if not resources:
+        raise SourceError("Open Data BCN: el censo no tiene ninguna edición en el DataStore.")
+    return max(resources, key=lambda r: r["name"])["id"]
+
+
+def search_url(resource_id: str, offset: int) -> str:
+    params = {
+        "resource_id": resource_id,
+        "fields": ",".join(FIELDS),
+        "filters": json.dumps({"Codi_Activitat_2022": sorted(ACTIVITY_CODES)}),
+        "sort": "ID_Global",  # orden estable entre páginas
+        "limit": PAGE_SIZE,
+        "offset": offset,
+    }
+    return f"{API}/datastore_search?{urlencode(params)}"
+
+
+def datastore_rows(resource_id: str) -> Iterator[dict]:
+    offset = 0
+    while True:
+        result = _api(search_url(resource_id, offset))
+        records = result.get("records") or []
+        yield from records
+        offset += len(records)
+        if not records or offset >= int(result.get("total") or 0):
+            return
 
 
 def _address(row: dict) -> str:
@@ -121,18 +166,6 @@ def row_to_raw(row: dict) -> RawCompany | None:
     )
 
 
-def _stream_rows(url: str) -> Iterator[dict]:
-    headers = {"User-Agent": USER_AGENT, "Accept": "text/csv"}
-    try:
-        with httpx.stream("GET", url, headers=headers, timeout=120, follow_redirects=True) as r:
-            if r.status_code != 200:
-                raise SourceError(f"Open Data BCN respondió {r.status_code} al descargar el censo.")
-            r.encoding = "utf-8-sig"  # el CSV lleva BOM
-            yield from csv.DictReader(r.iter_lines())
-    except httpx.HTTPError as exc:
-        raise SourceError(f"Descarga del censo fallida: {exc}") from exc
-
-
 class OpenDataBcnAdapter:
     name = Source.OPENDATA_BCN
 
@@ -141,7 +174,7 @@ class OpenDataBcnAdapter:
         self.rows = rows
 
     def fetch(self) -> Iterable[RawCompany]:
-        rows = self.rows if self.rows is not None else _stream_rows(latest_csv_url())
+        rows = self.rows if self.rows is not None else datastore_rows(latest_resource_id())
         total = kept = 0
         for row in rows:
             total += 1

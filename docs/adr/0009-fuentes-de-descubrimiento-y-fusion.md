@@ -70,11 +70,16 @@ Verificado contra documentación viva en septiembre de 2026:
   nombre, actividad, dirección y coordenadas de ~68.000 locales a pie de calle, justo el tipo de
   sitio donde se entrega un CV en mano. Las actividades son gruesas, así que se filtran dos
   (`Serveis a les empreses i oficines`, `Arts gràfiques`) y se clasifica por palabras clave en el
-  nombre del local (~150 empresas). El CSV (~25 MB) se procesa en streaming sin cachearlo en BD.
+  nombre del local. Se consulta la **API DataStore de CKAN** (`datastore_search` con filtro de
+  actividad y solo 12 columnas, 3 páginas cacheadas): la descarga directa del CSV redirige a un
+  desafío anti-bot desde las IPs de GitHub Actions y no se fuerza. El DataStore tiene menos filas
+  que el CSV más reciente (~2.500 frente a ~4.000 de esas actividades): ~90 empresas del sector.
 - **Ingesta por lotes.** Con ~7 consultas por empresa, 2.700 lugares tardaban más de 30 min
   (Actions en EE. UU. ↔ Neon en Frankfurt). Ahora se cargan empresas y registros una vez, se
   decide todo en memoria (índice por dominio y rejilla de ~200 m) y se escribe con
   `bulk_create`/`bulk_update` cada 500: el descubrimiento completo tarda ~1 min.
+- Una respuesta que no es la esperada (p. ej. la página de un desafío anti-bot servida con 200)
+  es un error de la fuente, nunca una lectura vacía; y una fuente vacía nunca retira nada.
 - **Retirada.** Tras una lectura completa y sin errores de una fuente, sus registros que ya no
   aparecen se borran; una empresa sin ninguna fuente pasa a inactiva (no se borra: puede tener
   favoritos o visitas) y vuelve a activarse si reaparece. Una fuente caída o vacía no retira nada.

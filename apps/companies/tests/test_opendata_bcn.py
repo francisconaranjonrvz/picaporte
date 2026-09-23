@@ -1,16 +1,18 @@
 import json
+from urllib.parse import parse_qs, urlsplit
 
-import httpx
 import pytest
 
-from apps.companies.http import Fetched
+from apps.companies.http import Fetched, FetchError
 from apps.companies.sources import opendata_bcn
 from apps.companies.sources.base import SourceError
 from apps.companies.sources.opendata_bcn import (
     OpenDataBcnAdapter,
     category_for_name,
-    latest_csv_url,
+    datastore_rows,
+    latest_resource_id,
     row_to_raw,
+    search_url,
 )
 
 ROW = {
@@ -89,67 +91,68 @@ def test_adaptador_con_filas_inyectadas():
     assert [r.external_id for r in OpenDataBcnAdapter(rows=rows).fetch()] == ["5f15-abc"]
 
 
-def _ckan(resources):
-    return Fetched(200, json.dumps({"result": {"resources": resources}}), False)
+def _ok(result):
+    return Fetched(200, json.dumps({"success": True, "result": result}), False)
 
 
-def test_ultima_edicion_del_censo(monkeypatch):
+def test_ultima_edicion_en_el_datastore(monkeypatch):
     resources = [
-        {"format": "CSV", "name": "2022_CensComercialBCN.csv", "url": "u2022"},
-        {"format": "CSV", "name": "2024_CensComercial_BCN.csv", "url": "u2024"},
-        {"format": "GeoJSON", "name": "2025_algo.geojson", "url": "geo"},
-        {"format": "CSV", "name": "Llegenda.csv", "url": "ley"},
+        {"name": "2022_CensComercialBCN.csv", "id": "r2022", "datastore_active": True},
+        {"name": "2024_CensComercial_BCN.csv", "id": "r2024", "datastore_active": True},
+        {"name": "2025_algo.geojson", "id": "geo", "datastore_active": False},
+        {"name": "Llegenda.csv", "id": "ley", "datastore_active": True},
     ]
-    monkeypatch.setattr(opendata_bcn, "fetch", lambda *a, **k: _ckan(resources))
-    assert latest_csv_url() == "u2024"
+    monkeypatch.setattr(opendata_bcn, "fetch", lambda *a, **k: _ok({"resources": resources}))
+    assert latest_resource_id() == "r2024"
+
+
+def test_busqueda_filtra_en_servidor_y_pide_solo_columnas_utiles():
+    query = parse_qs(urlsplit(search_url("r2024", 1000)).query)
+    assert query["resource_id"] == ["r2024"]
+    assert json.loads(query["filters"][0]) == {"Codi_Activitat_2022": ["1600400", "1700700"]}
+    assert query["fields"][0].split(",") == opendata_bcn.FIELDS
+    assert (query["limit"], query["offset"]) == (["1000"], ["1000"])
+
+
+def test_paginacion_del_datastore(monkeypatch):
+    pages = {
+        0: {"records": [{"ID_Global": "a"}, {"ID_Global": "b"}], "total": 3},
+        2: {"records": [{"ID_Global": "c"}], "total": 3},
+    }
+    requested = []
+
+    def fake_fetch(url, **kwargs):
+        offset = int(parse_qs(urlsplit(url).query)["offset"][0])
+        requested.append(offset)
+        return _ok(pages[offset])
+
+    monkeypatch.setattr(opendata_bcn, "fetch", fake_fetch)
+    assert [r["ID_Global"] for r in datastore_rows("r2024")] == ["a", "b", "c"]
+    assert requested == [0, 2]
 
 
 @pytest.mark.parametrize(
     ("response", "message"),
     [
         (Fetched(500, "", False), "500"),
-        (Fetched(200, "no json", False), "CKAN"),
-        (_ckan([{"format": "XLSX", "name": "2024.xlsx", "url": "x"}]), "CSV"),
+        (Fetched(200, "<html>challenge</html>", False), "CKAN"),  # desafío anti-bot
+        (Fetched(200, json.dumps({"success": False}), False), "CKAN"),
+        (
+            _ok({"resources": [{"name": "2024.csv", "id": "x", "datastore_active": False}]}),
+            "DataStore",
+        ),
     ],
 )
 def test_errores_de_ckan(monkeypatch, response, message):
     monkeypatch.setattr(opendata_bcn, "fetch", lambda *a, **k: response)
     with pytest.raises(SourceError, match=message):
-        latest_csv_url()
+        latest_resource_id()
 
 
-def test_descarga_en_streaming_con_bom(monkeypatch):
-    body = "﻿ID_Global,Codi_Activitat_2022,Nom_Local,Nom_Via\r\nid1,1600400,ROAD PUBLICIDAD,X\r\n"
+def test_sin_red(monkeypatch):
+    def fail(*args, **kwargs):
+        raise FetchError("dns")
 
-    def handler(request):
-        assert request.headers["User-Agent"].startswith("picaporte/")
-        return httpx.Response(200, content=body.encode("utf-8"))
-
-    transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(
-        opendata_bcn.httpx,
-        "stream",
-        lambda method, url, **kw: httpx.Client(transport=transport).stream(
-            method, url, headers=kw.get("headers")
-        ),
-    )
-    rows = list(opendata_bcn._stream_rows("https://example.org/censo.csv"))
-    assert rows == [
-        {
-            "ID_Global": "id1",
-            "Codi_Activitat_2022": "1600400",
-            "Nom_Local": "ROAD PUBLICIDAD",
-            "Nom_Via": "X",
-        }
-    ]
-
-
-def test_descarga_con_error_http(monkeypatch):
-    transport = httpx.MockTransport(lambda request: httpx.Response(404))
-    monkeypatch.setattr(
-        opendata_bcn.httpx,
-        "stream",
-        lambda method, url, **kw: httpx.Client(transport=transport).stream(method, url),
-    )
-    with pytest.raises(SourceError, match="404"):
-        list(opendata_bcn._stream_rows("https://example.org/censo.csv"))
+    monkeypatch.setattr(opendata_bcn, "fetch", fail)
+    with pytest.raises(SourceError, match="no responde"):
+        list(OpenDataBcnAdapter().fetch())
