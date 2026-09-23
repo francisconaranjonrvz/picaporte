@@ -68,11 +68,18 @@ def call_structured[T: BaseModel](
     output_model: type[T],
     pdf_bytes: bytes | None = None,
     model: str | None = None,
+    fast: bool = False,
     max_tokens: int = 4096,
 ) -> LLMResult[T]:
-    """Llama al modelo (o devuelve la caché) y valida la salida con `output_model`."""
+    """Llama al modelo (o devuelve la caché) y valida la salida con `output_model`.
+
+    `fast=True` elige el modelo de volumen (`LLM_MODEL_FAST` o el rápido del proveedor).
+    """
     provider = get_provider()
-    model = model or settings.LLM_MODEL or provider.default_model
+    if fast:
+        model = model or settings.LLM_MODEL_FAST or provider.fast_model
+    else:
+        model = model or settings.LLM_MODEL or provider.default_model
     payload = pdf_bytes or b""
     input_hash = _input_hash(
         provider.name, model, prompt_version, system, user_text, output_model, payload

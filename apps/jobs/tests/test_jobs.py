@@ -94,8 +94,8 @@ def test_start_discover_crea_job_y_reusa_el_activo(token, monkeypatch):
         services.github, "run_state", lambda run_id: github.RunState("in_progress", None, "")
     )
 
-    job = services.start_discover_from_app()
-    again = services.start_discover_from_app()
+    job = services.start_from_app(JobRun.Kind.DISCOVER)
+    again = services.start_from_app(JobRun.Kind.DISCOVER)
 
     assert job.status == JobRun.Status.QUEUED
     assert job.trigger == JobRun.Trigger.APP
@@ -125,7 +125,7 @@ def test_start_discover_no_se_bloquea_por_un_job_muerto(token, monkeypatch):
     )
 
     # El activo más reciente está cancelado en GitHub: se cierra y se lanza uno nuevo.
-    job = services.start_discover_from_app()
+    job = services.start_from_app(JobRun.Kind.DISCOVER)
 
     cancelled.refresh_from_db()
     assert cancelled.status == JobRun.Status.FAILED
@@ -141,7 +141,7 @@ def test_start_discover_no_se_bloquea_por_un_job_muerto(token, monkeypatch):
 def test_start_discover_sin_token_deja_el_job_fallido(settings):
     settings.GITHUB_DISPATCH_TOKEN = ""
 
-    job = services.start_discover_from_app()
+    job = services.start_from_app(JobRun.Kind.DISCOVER)
 
     assert job.status == JobRun.Status.FAILED
     assert "GITHUB_DISPATCH_TOKEN" in job.error
@@ -178,7 +178,7 @@ def test_boton_y_estado_por_htmx(auth_client, token, monkeypatch):
         lambda wf, inputs: github.DispatchedRun(1, "https://gh/1"),
     )
 
-    resp = auth_client.post(reverse("job_trigger_discover"))
+    resp = auth_client.post(reverse("job_trigger", args=["discover"]))
 
     assert resp.status_code == 200
     assert "En cola en GitHub Actions" in resp.text
@@ -188,7 +188,7 @@ def test_boton_y_estado_por_htmx(auth_client, token, monkeypatch):
     JobRun.objects.update(
         status=JobRun.Status.SUCCESS, finished_at=timezone.now(), summary="osm: 3 nuevas"
     )
-    resp = auth_client.get(reverse("job_status"))
+    resp = auth_client.get(reverse("job_status", args=["discover"]))
     assert "hx-trigger" not in resp.text
     assert "osm: 3 nuevas" in resp.text
 
@@ -212,5 +212,35 @@ def test_explorar_muestra_cifras_y_estado(auth_client, db):
 
 
 def test_las_rutas_de_jobs_requieren_login(client, db):
-    assert client.post(reverse("job_trigger_discover")).status_code == 302
-    assert client.get(reverse("job_status")).status_code == 302
+    assert client.post(reverse("job_trigger", args=["discover"])).status_code == 302
+    assert client.get(reverse("job_status", args=["discover"])).status_code == 302
+
+
+def test_enriquecimiento_desde_la_app_pasa_el_modo(auth_client, token, monkeypatch):
+    dispatched = []
+
+    def fake_dispatch(workflow, inputs):
+        dispatched.append((workflow, inputs))
+        return github.DispatchedRun(2, "https://gh/2")
+
+    monkeypatch.setattr(services.github, "dispatch_workflow", fake_dispatch)
+
+    resp = auth_client.post(reverse("job_trigger", args=["enrich"]), {"mode": "score"})
+    assert resp.status_code == 200
+    assert 'id="job-status-enrich"' in resp.text
+    job = JobRun.objects.get()
+    assert job.kind == JobRun.Kind.ENRICH
+    assert dispatched == [("enrich.yml", {"job_id": str(job.pk), "mode": "score"})]
+
+    # Un modo desconocido se normaliza; mientras hay uno activo no se lanza otro.
+    auth_client.post(reverse("job_trigger", args=["enrich"]), {"mode": "rm -rf"})
+    assert len(dispatched) == 1
+
+    JobRun.objects.update(status=JobRun.Status.SUCCESS, finished_at=timezone.now())
+    auth_client.post(reverse("job_trigger", args=["enrich"]), {"mode": "rm -rf"})
+    assert dispatched[-1][1]["mode"] == "all"
+
+
+def test_tipo_de_trabajo_desconocido_es_404(auth_client):
+    assert auth_client.post(reverse("job_trigger", args=["borrar"])).status_code == 404
+    assert auth_client.get(reverse("job_status", args=["borrar"])).status_code == 404

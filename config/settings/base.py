@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.profiles",
     "apps.companies",
     "apps.jobs",
+    "apps.enrichment",
 ]
 
 MIDDLEWARE = [
@@ -120,6 +121,8 @@ LLM_PROVIDER = env("LLM_PROVIDER", default="nvidia")
 NVIDIA_API_KEY = env("NVIDIA_API_KEY", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 LLM_MODEL = env("LLM_MODEL", default="")  # vacío = modelo por defecto del proveedor
+# Modelo para tareas de volumen (enriquecimiento de cientos de webs); vacío = el rápido del proveedor.
+LLM_MODEL_FAST = env("LLM_MODEL_FAST", default="")
 LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=90)  # el nivel gratuito de NVIDIA es lento y variable
 
 # GitHub Actions: la app lanza los workflows de descubrimiento/enriquecimiento (fase 3).

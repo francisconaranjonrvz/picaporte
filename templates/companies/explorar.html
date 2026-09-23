@@ -6,7 +6,7 @@
     <h1 class="text-2xl font-extrabold tracking-tight">Explorar</h1>
     <p class="text-sm text-muted">Empresas de Barcelona donde llamar a la puerta.</p>
   </div>
-  <span class="badge badge-primary">Fase 3</span>
+  <span class="badge badge-primary">Fase 4</span>
 </header>
 
 <div class="space-y-4">
@@ -15,13 +15,67 @@
       <h2 class="font-bold">Descubrimiento</h2>
       {% if total %}<span class="badge badge-muted">{{ total }} empresas</span>{% endif %}
     </div>
-    <div class="mt-3">{% include "jobs/_status.html" %}</div>
-    <form hx-post="{% url 'job_trigger_discover' %}" hx-target="#job-status" hx-swap="outerHTML" class="mt-3">
+    <div class="mt-3">{% include "jobs/_status.html" with job=discover_job kind="discover" %}</div>
+    <form hx-post="{% url 'job_trigger' 'discover' %}" hx-target="#job-status-discover" hx-swap="outerHTML" class="mt-3">
       {% csrf_token %}
-      {% btn type="submit" size="md" cls="w-full" disabled=job.is_active %}{% icon "search" "size-5" %}Buscar nuevas empresas{% endbtn %}
+      {% btn type="submit" size="md" cls="w-full" disabled=discover_job.is_active %}{% icon "search" "size-5" %}Buscar nuevas empresas{% endbtn %}
     </form>
     <p class="mt-2 text-xs text-muted">Lanza el workflow en GitHub Actions (también corre solo cada lunes). Tarda 1-3 minutos.</p>
   {% endcard %}
+
+  {% if total %}
+  {% card %}
+    <div class="flex items-center justify-between">
+      <h2 class="font-bold">Encaje con tu perfil</h2>
+      {% if enrichment.scored %}<span class="badge badge-muted">{{ enrichment.scored }} puntuadas</span>{% endif %}
+    </div>
+    <p class="mt-1 text-sm text-muted">
+      Lee la web de cada empresa (máx. 5 páginas, respetando robots.txt), la resume con IA y puntúa de 0 a 100 cuánto encaja contigo.
+      {{ enrichment.crawled }} webs leídas · {{ enrichment.extracted }} analizadas.
+    </p>
+    {% if not enrichment.profile_ready %}
+      <p class="mt-2 text-sm text-warning-ink">Para puntuar hace falta tu perfil: sube y analiza el CV en <a class="underline" href="{% url 'perfil' %}">Perfil</a>.</p>
+    {% elif enrichment.stale %}
+      <p class="mt-2 text-sm text-warning-ink">Tu perfil ha cambiado: {{ enrichment.stale }} empresa{{ enrichment.stale|pluralize }} con la puntuación anterior.</p>
+    {% endif %}
+    <div class="mt-3">{% include "jobs/_status.html" with job=enrich_job kind="enrich" %}</div>
+    <div class="mt-3 grid gap-2">
+      <form hx-post="{% url 'job_trigger' 'enrich' %}" hx-target="#job-status-enrich" hx-swap="outerHTML">
+        {% csrf_token %}<input type="hidden" name="mode" value="all">
+        {% btn type="submit" size="md" cls="w-full" disabled=enrich_job.is_active %}{% icon "sparkles" "size-5" %}Analizar webs y puntuar{% endbtn %}
+      </form>
+      {% if enrichment.stale %}
+      <form hx-post="{% url 'job_trigger' 'enrich' %}" hx-target="#job-status-enrich" hx-swap="outerHTML">
+        {% csrf_token %}<input type="hidden" name="mode" value="score">
+        {% btn type="submit" variant="secondary" size="md" cls="w-full" disabled=enrich_job.is_active %}Solo recalcular el encaje{% endbtn %}
+      </form>
+      {% endif %}
+    </div>
+    <p class="mt-2 text-xs text-muted">Corre en GitHub Actions (también cada lunes, tras la búsqueda): hasta 150 webs por ejecución, unos 20-40 minutos. Recalcular el encaje no vuelve a leer las webs.</p>
+  {% endcard %}
+  {% endif %}
+
+  {% if top_matches %}
+  {% card %}
+    <h2 class="font-bold">Mejor encaje</h2>
+    <ul class="mt-2 divide-y divide-primary/40">
+      {% for e in top_matches %}
+      <li class="py-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-semibold">{{ e.company.name }}</p>
+            <p class="text-xs text-muted">{{ e.company.category.name|default:"Sin categoría" }}{% if e.company.zone %} · {{ e.company.zone.name }}{% endif %}</p>
+          </div>
+          <span class="badge {% if e.fit_score >= 70 %}badge-success{% elif e.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} shrink-0">{{ e.fit_score }}</span>
+        </div>
+        {% if e.fit_reason %}<p class="mt-1 text-sm text-muted">{{ e.fit_reason }}</p>{% endif %}
+        {% if e.hook %}<p class="mt-2 rounded-xl bg-bg p-3 text-sm italic">«{{ e.hook }}»</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="mt-2 text-xs text-muted">La lista completa, con filtros y mapa, llega en la fase 5.</p>
+  {% endcard %}
+  {% endif %}
 
   {% if total %}
   {% card %}

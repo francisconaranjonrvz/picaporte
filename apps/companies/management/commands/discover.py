@@ -13,7 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 from apps.companies.services import run_discovery
 from apps.companies.sources import ADAPTERS
 from apps.jobs.models import JobRun
-from apps.jobs.services import attach_github_context, trigger_from_env
+from apps.jobs.services import begin_job
 
 
 class Command(BaseCommand):
@@ -35,7 +35,7 @@ class Command(BaseCommand):
         if names and (unknown := [n for n in names if n not in ADAPTERS]):
             raise CommandError(f"Fuentes desconocidas: {', '.join(unknown)}")
 
-        job = self._job(job_id)
+        job = begin_job(JobRun.Kind.DISCOVER, job_id)
         try:
             results = run_discovery(names, dry_run=dry_run)
         except Exception as exc:
@@ -65,12 +65,3 @@ class Command(BaseCommand):
         )
         if all_failed:
             raise CommandError("Todas las fuentes han fallado.")
-
-    @staticmethod
-    def _job(job_id: int | None) -> JobRun:
-        job = JobRun.objects.filter(pk=job_id).first() if job_id else None
-        if job is None:
-            job = JobRun.objects.create(kind=JobRun.Kind.DISCOVER, trigger=trigger_from_env(job_id))
-        attach_github_context(job)
-        job.mark_running()
-        return job

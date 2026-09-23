@@ -7,6 +7,9 @@ from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.enrichment.profile import stale_scores_count
+from apps.jobs.models import JobRun
+from apps.jobs.views import latest
 from apps.llm.client import LLMError
 
 from .forms import CVUploadForm, ProfileForm
@@ -38,7 +41,14 @@ def _cv(profile: Profile) -> CVDocument | None:
 
 
 def _form_context(profile: Profile, form: ProfileForm | None = None, **extra):
-    return {"profile": profile, "form": form or ProfileForm(instance=profile), **extra}
+    return {
+        "profile": profile,
+        "form": form or ProfileForm(instance=profile),
+        # Puntuaciones hechas con un perfil anterior: se ofrece recalcularlas (fase 4).
+        "stale_scores": stale_scores_count(profile),
+        "enrich_job": latest(JobRun.Kind.ENRICH),
+        **extra,
+    }
 
 
 def perfil(request):

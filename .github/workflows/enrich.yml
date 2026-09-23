@@ -1,0 +1,64 @@
+name: Enriquecimiento de empresas
+
+# Lee las webs de las empresas, las analiza con IA y puntúa su encaje con el perfil.
+# Cada noche avanza un lote (hasta 150 webs; el nivel gratuito de la IA es lento) y
+# a demanda desde la app: "Analizar webs y puntuar" (mode=all) o "Solo recalcular el
+# encaje" (mode=score, tras cambiar el perfil; no vuelve a leer las webs).
+on:
+  schedule:
+    - cron: "30 3 * * *"
+      timezone: Europe/Madrid
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Id del JobRun creado por la app (vacío si se lanza a mano)"
+        required: false
+        default: ""
+      mode:
+        description: "all = rastrear + analizar + puntuar · score = solo puntuar"
+        required: false
+        default: "all"
+        type: choice
+        options: [all, score]
+      limit:
+        description: "Máximo de webs a rastrear"
+        required: false
+        default: "150"
+
+run-name: "enrich ${{ inputs.mode || 'all' }} [job ${{ inputs.job_id || 'cron' }}]"
+
+permissions:
+  contents: read
+
+# Grupo propio: no bloquea al descubrimiento (que es corto) y nunca hay dos a la vez.
+concurrency:
+  group: enrich
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    name: enrich
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ALLOWED_HOSTS: localhost
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      # El nivel gratuito tarda a veces más de 90 s por llamada; aquí no hay un usuario esperando.
+      LLM_TIMEOUT: "150"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev --group worker
+      - name: Enriquecer empresas
+        run: >-
+          uv run python manage.py enrich
+          --mode ${{ inputs.mode || 'all' }}
+          --limit ${{ inputs.limit || '150' }}
+          --max-minutes 45
+          ${{ inputs.job_id && format('--job-id {0}', inputs.job_id) || '' }}

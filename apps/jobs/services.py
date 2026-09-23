@@ -9,25 +9,33 @@ from django.utils import timezone
 from . import github
 from .models import JobRun
 
-DISCOVER_WORKFLOW = "discover.yml"
+WORKFLOWS = {
+    JobRun.Kind.DISCOVER: "discover.yml",
+    JobRun.Kind.ENRICH: "enrich.yml",
+}
 GITHUB_CHECK_INTERVAL = timedelta(seconds=15)
 # discover.yml corta a los 45 min: un job "activo" más viejo que esto murió sin avisar
 # (p. ej. cancelado) y no debe bloquear el botón.
 STALE_AFTER = timedelta(hours=1)
 
 
-def start_discover_from_app() -> JobRun:
-    """Crea el JobRun y dispara el workflow; el comando en Actions lo continúa por id."""
+def start_from_app(kind: str, inputs: dict[str, str] | None = None) -> JobRun:
+    """Crea el JobRun y dispara su workflow; el comando en Actions lo continúa por id.
+
+    Si ya hay uno activo del mismo tipo (y sigue vivo en GitHub), se devuelve ese.
+    """
     active = JobRun.objects.filter(
-        kind=JobRun.Kind.DISCOVER, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
+        kind=kind, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
     ).first()
     if active is not None:
         active = refresh_from_github(active)
         if active.is_active:
             return active
-    job = JobRun.objects.create(kind=JobRun.Kind.DISCOVER, trigger=JobRun.Trigger.APP)
+    job = JobRun.objects.create(kind=kind, trigger=JobRun.Trigger.APP)
     try:
-        dispatched = github.dispatch_workflow(DISCOVER_WORKFLOW, {"job_id": str(job.pk)})
+        dispatched = github.dispatch_workflow(
+            WORKFLOWS[kind], {"job_id": str(job.pk), **(inputs or {})}
+        )
     except github.GitHubError as exc:
         job.mark_finished(stats={}, summary="", error=str(exc))
         return job
@@ -47,6 +55,16 @@ def attach_github_context(job: JobRun) -> None:
     job.github_run_id = int(run_id)
     job.github_run_url = f"{server}/{repo}/actions/runs/{run_id}"
     job.save(update_fields=["github_run_id", "github_run_url"])
+
+
+def begin_job(kind: str, job_id: int | None) -> JobRun:
+    """Para los comandos: continúa el JobRun creado por la app o crea uno, y lo marca en marcha."""
+    job = JobRun.objects.filter(pk=job_id, kind=kind).first() if job_id else None
+    if job is None:
+        job = JobRun.objects.create(kind=kind, trigger=trigger_from_env(job_id))
+    attach_github_context(job)
+    job.mark_running()
+    return job
 
 
 def trigger_from_env(job_id: int | None) -> str:

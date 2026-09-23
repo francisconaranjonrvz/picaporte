@@ -23,6 +23,7 @@ class Completion[T: BaseModel]:
 class Provider(Protocol):
     name: str
     default_model: str
+    fast_model: str  # para tareas de volumen (enriquecimiento)
 
     def price_per_mtok(self, model: str) -> tuple[Decimal, Decimal]:
         """USD por millón de tokens (entrada, salida); (0, 0) si es gratuito."""

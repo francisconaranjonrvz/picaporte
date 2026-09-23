@@ -28,6 +28,7 @@ PRICES_PER_MTOK: dict[str, tuple[Decimal, Decimal]] = {
 class AnthropicProvider:
     name = "anthropic"
     default_model = "claude-haiku-4-5"
+    fast_model = "claude-haiku-4-5"
 
     def price_per_mtok(self, model: str) -> tuple[Decimal, Decimal]:
         return PRICES_PER_MTOK.get(model, (Decimal(0), Decimal(0)))

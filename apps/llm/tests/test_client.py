@@ -18,6 +18,7 @@ class FakeProvider:
 
     name = "fake"
     default_model = "fake-model"
+    fast_model = "fake-fast"
 
     def __init__(self, output, price=(Decimal("1.00"), Decimal("5.00"))):
         self.output = output
@@ -35,6 +36,7 @@ class FakeProvider:
 @pytest.fixture
 def fake(monkeypatch, settings):
     settings.LLM_MODEL = ""
+    settings.LLM_MODEL_FAST = ""
     provider = FakeProvider(Salida(nombre="Laura", etiquetas=["eventos"]))
     monkeypatch.setattr(llm, "get_provider", lambda: provider)
     return provider
@@ -75,6 +77,15 @@ def test_llm_model_de_settings_tiene_prioridad(fake, settings):
     settings.LLM_MODEL = "otro/modelo"
 
     assert _call().call.model == "otro/modelo"
+
+
+@pytest.mark.django_db
+def test_modelo_rapido_para_tareas_de_volumen(fake, settings):
+    settings.LLM_MODEL = "modelo-cv"
+    assert _call(fast=True).call.model == "fake-fast"  # LLM_MODEL no afecta al rápido
+    settings.LLM_MODEL_FAST = "otro-rapido"
+    assert _call(fast=True, user_text="otra").call.model == "otro-rapido"
+    assert _call(user_text="cv").call.model == "modelo-cv"
 
 
 @pytest.mark.django_db

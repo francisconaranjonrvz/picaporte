@@ -129,6 +129,19 @@ def test_repara_json_invalido_una_vez(provider):
     assert "no cumple el esquema" in repair[3]["content"]
 
 
+def test_si_devuelve_el_esquema_se_le_dice_claramente(provider):
+    schema_echo = '{"properties": {"nombre": {"type": "string"}}, "type": "object"}'
+    provider.fake.outcomes = [
+        _response(schema_echo),
+        _response('{"nombre": "Laura", "etiquetas": []}'),
+    ]
+
+    assert _complete(provider).output.nombre == "Laura"
+    repair = provider.fake.calls[1]["messages"][3]["content"]
+    assert "esquema JSON, no los datos" in repair
+    assert "nunca el esquema" in provider.fake.calls[0]["messages"][0]["content"]
+
+
 def test_dos_json_invalidos_es_error(provider):
     provider.fake.outcomes = [_response("nada"), _response("{}")]
 
@@ -201,6 +214,15 @@ def test_client_real_apunta_a_nvidia_sin_reintentos(settings):
     assert client.timeout == 45
     assert NvidiaProvider().price_per_mtok("google/gemma-4-31b-it") == (0, 0)
     assert NvidiaProvider().default_model == "google/gemma-4-31b-it"
+    assert NvidiaProvider().fast_model == "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+
+def test_modelo_rapido_va_sin_razonamiento(provider):
+    _complete(provider, model="nvidia/nemotron-3.5-lightning-30b-a3b", pdf_bytes=None)
+
+    call = provider.fake.calls[0]
+    assert call["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert call["response_format"] == {"type": "json_object"}
 
 
 def test_el_esquema_del_prompt_es_json_valido(provider):
