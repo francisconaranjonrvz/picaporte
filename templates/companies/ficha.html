@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block content %}
+<header class="mb-4 flex items-start gap-3">
+  <a href="{% url 'explorar' %}" onclick="if (history.length > 1) { history.back(); return false; }"
+     class="flex size-11 shrink-0 items-center justify-center rounded-full bg-surface shadow-soft" aria-label="Volver">{% icon "arrow-left" "size-5" %}</a>
+  <div class="min-w-0 flex-1">
+    <h1 class="text-2xl font-extrabold leading-tight tracking-tight">{{ company.name }}</h1>
+    <p class="text-sm text-muted">{{ company.category.name|default:"Sin categoría" }}{% if company.zone %} · {{ company.zone.name }}{% endif %}</p>
+  </div>
+  {% include "tracking/_heart.html" with is_favorite=favorite %}
+</header>
+
+<div class="space-y-4">
+  {# Encaje con el perfil #}
+  {% if enrichment.fit_score is not None %}
+  {% card %}
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="font-bold">Encaje con tu perfil</h2>
+      <span class="badge {% if enrichment.fit_score >= 70 %}badge-success{% elif enrichment.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} text-sm">{{ enrichment.fit_score }}/100</span>
+    </div>
+    {% if enrichment.fit_reason %}<p class="mt-2 text-sm text-muted">{{ enrichment.fit_reason }}</p>{% endif %}
+    {% if enrichment.hook %}
+    <div class="mt-3 rounded-xl bg-bg p-3" x-data="{ copied: false }">
+      <p class="text-xs font-semibold uppercase tracking-wide text-action-fill">Para presentarte</p>
+      <p class="mt-1 text-sm italic" x-ref="hook">«{{ enrichment.hook }}»</p>
+      <button type="button" class="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-action-fill"
+              x-on:click="navigator.clipboard.writeText($refs.hook.innerText.replace(/^«|»$/g, '')); copied = true; setTimeout(() => copied = false, 1500)">
+        {% icon "copy" "size-4" %}<span x-text="copied ? 'Copiado' : 'Copiar'">Copiar</span>
+      </button>
+    </div>
+    {% endif %}
+  {% endcard %}
+  {% endif %}
+
+  {# Estado y seguimiento #}
+  {% card %}
+    {% include "tracking/_status_panel.html" %}
+    <details class="mt-3 group">
+      <summary class="cursor-pointer text-sm font-semibold text-action-fill">Fecha, contacto y próxima acción</summary>
+      <div class="mt-3">{% include "tracking/_visit_form.html" %}</div>
+    </details>
+  {% endcard %}
+
+  {# Cómo llegar y contactar #}
+  {% card %}
+    <h2 class="font-bold">Dónde y cuándo</h2>
+    <dl class="mt-2 space-y-2 text-sm">
+      {% if company.address %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "map-pin" "size-4" %}</dt><dd>{{ company.address }}{% if company.postcode %}, {{ company.postcode }}{% endif %}</dd></div>{% endif %}
+      <div class="flex gap-2">
+        <dt class="text-action-fill">{% icon "clock" "size-4" %}</dt>
+        <dd>
+          <span class="badge {% if open_now %}badge-success{% else %}badge-muted{% endif %}">{% if open_now %}Abierto ahora{% else %}Cerrado ahora{% endif %}</span>
+          {{ today_label }}
+          {% if opening.estimated %}<span class="block text-xs text-muted">Horario de oficina estimado: esta empresa no publica su horario.</span>
+          {% else %}<span class="block text-xs text-muted">{{ company.opening_hours }}</span>{% endif %}
+        </dd>
+      </div>
+      {% if enrichment.emails %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "mail" "size-4" %}</dt><dd class="break-all">{% for email in enrichment.emails %}<a class="underline-offset-2 hover:underline" href="mailto:{{ email }}">{{ email }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</dd></div>
+      {% elif company.email %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "mail" "size-4" %}</dt><dd class="break-all"><a href="mailto:{{ company.email }}">{{ company.email }}</a></dd></div>{% endif %}
+      {% if enrichment.socials %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "globe" "size-4" %}</dt><dd>{% for network, url in enrichment.socials.items %}<a class="capitalize text-action-fill" href="{{ url }}" target="_blank" rel="noopener">{{ network }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</dd></div>{% endif %}
+    </dl>
+    <div class="mt-3 grid grid-cols-3 gap-2">
+      {% if company.tel_url %}{% btn href=company.tel_url variant="secondary" size="sm" %}{% icon "phone" "size-4" %}Llamar{% endbtn %}{% endif %}
+      {% if company.maps_url %}{% btn href=company.maps_url variant="secondary" size="sm" %}{% icon "navigation" "size-4" %}Maps{% endbtn %}{% endif %}
+      {% if company.website %}{% btn href=company.website variant="secondary" size="sm" %}{% icon "external-link" "size-4" %}Web{% endbtn %}{% endif %}
+    </div>
+  {% endcard %}
+
+  {# Lo que dice su web (IA) #}
+  {% if enrichment.extracted_at %}
+  {% card %}
+    <h2 class="font-bold">Qué hacen</h2>
+    {% if enrichment.summary %}<p class="mt-2 text-sm">{{ enrichment.summary }}</p>{% endif %}
+    {% if enrichment.services %}
+      <p class="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Servicios</p>
+      <div class="mt-1 flex flex-wrap gap-1.5">{% for s in enrichment.services %}<span class="badge badge-primary">{{ s }}</span>{% endfor %}</div>
+    {% endif %}
+    {% if enrichment.clients %}
+      <p class="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Clientes y proyectos</p>
+      <p class="mt-1 text-sm">{{ enrichment.clients|join:", " }}</p>
+    {% endif %}
+    <dl class="mt-3 grid grid-cols-2 gap-2 text-sm">
+      <dt class="text-muted">Tamaño</dt><dd class="text-right">{{ enrichment.get_size_estimate_display }}</dd>
+      <dt class="text-muted">¿Piden catalán?</dt><dd class="text-right">{{ enrichment.get_requires_catalan_display }}</dd>
+    </dl>
+    {% if enrichment.hiring_note %}<p class="mt-3 rounded-xl bg-success p-3 text-sm text-success-ink">{{ enrichment.hiring_note }}</p>{% endif %}
+    {% if enrichment.jobs_url %}<a class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-action-fill" href="{{ enrichment.jobs_url }}" target="_blank" rel="noopener">{% icon "external-link" "size-4" %}Página de empleo</a>{% endif %}
+    <p class="mt-3 text-xs text-muted">Resumen generado con IA a partir de su web ({{ enrichment.extracted_at|date:"j M Y" }}). Puede contener errores.</p>
+  {% endcard %}
+  {% elif enrichment %}
+  <p class="px-1 text-sm text-muted">Web: {{ enrichment.get_crawl_status_display }}{% if enrichment.crawl_status == "pending" %} (se analizará en una próxima ejecución){% endif %}.</p>
+  {% endif %}
+
+  {# Notas #}
+  {% card %}
+    <h2 class="font-bold">Notas</h2>
+    <form class="mt-2 flex gap-2" hx-post="{% url 'note_add' company.pk %}" hx-target="#notes" hx-swap="outerHTML"
+          hx-on::after-request="if (event.detail.successful) this.reset()">
+      <label class="sr-only" for="note-text">Nueva nota</label>
+      <input id="note-text" name="text" class="field-input" placeholder="Hablé con…, volver el jueves…" maxlength="2000" required>
+      {% btn type="submit" size="md" aria_label="Añadir nota" %}{% icon "plus" "size-5" %}{% endbtn %}
+    </form>
+    <div hx-get="{% url 'notes' company.pk %}" hx-trigger="notes-changed from:body" hx-target="#notes" hx-swap="outerHTML"></div>
+    {% include "tracking/_notes.html" %}
+  {% endcard %}
+
+  <p class="px-1 text-xs text-muted">
+    Fuentes: {{ sources|join:", "|default:"—" }} · confianza {{ company.confidence_score }}/100
+  </p>
+</div>
+{% endblock %}

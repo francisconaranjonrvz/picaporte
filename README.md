@@ -16,7 +16,7 @@ hosting **0 €**.
 | ✅ Hecha | **2 · Perfil**: CV en PDF guardado en Neon (≤ 4 MB), parseo con un LLM gratuito (NVIDIA, JSON guiado + Pydantic, caché por hash; Claude opcional), perfil editable y preferencias (categorías, zonas, tamaño, idiomas, intereses) |
 | ✅ Hecha | **3 · Descubrimiento multi-fuente**: OpenStreetMap (Overpass), Foursquare OS Places (DuckDB sobre el parquet de Hugging Face) y el censo municipal de locales (Open Data BCN); dedupe/fusión, `confidence_score`, ingesta por lotes, retirada de lo que desaparece, workflow semanal + botón "Buscar nuevas empresas" con estado en la UI. Sin Google Places ni directorios con anti-bot (ADR 0009) |
 | ✅ Hecha | **4 · Enriquecimiento**: rastreo educado de la web (≤ 5 páginas, robots.txt, pausas), extracción y puntuación de encaje con IA gratuita en dos etapas (Pydantic, prompts versionados, caché por hash), gancho para presentarse, "Recalcular encaje" al cambiar el perfil sin volver a leer webs; cada noche en Actions (ADR 0010) |
-| ⏳ Pendiente | 5 · UI principal: Explorar, Mapa, ficha, Favoritas, tracker |
+| ✅ Hecha | **5 · UI principal**: Explorar con filtros (encaje, categoría, zona, estado, abierto ahora, catalán, confianza, favoritas) y paginación HTMX, Mapa (Leaflet), ficha con acciones de un toque, Favoritas con prioridad y arrastrar para ordenar, estados, notas y próximas acciones (ADR 0011) |
 | ⏳ Pendiente | 6 · Ruta del día con Google Maps |
 | ⏳ Pendiente | 7 · Ofertas (import desde career-ops) |
 
@@ -79,6 +79,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0011](docs/adr/0011-ui-principal-y-seguimiento.md) | **UI principal**: un formulario de filtros para lista y mapa, HTMX para parciales y acciones de un toque, horario OSM + horario de oficina estimado para "abierto ahora", Leaflet y SortableJS vendorizados, seguimiento con `Favorite`/`Visit`/`Note` |
 | [0010](docs/adr/0010-enriquecimiento-en-dos-etapas.md) | **Enriquecimiento en dos etapas**: rastreo propio y educado que guarda solo texto; *extracción* (depende de la web) y *puntuación* por lotes (perfil + empresa) con prompts versionados; cambiar el perfil solo repite la puntuación; modelo de volumen `LLM_MODEL_FAST`; cada noche en Actions con presupuesto de tiempo |
 | [0009](docs/adr/0009-fuentes-de-descubrimiento-y-fusion.md) | **Sin Google Places** (tarjeta obligatoria y términos que prohíben guardar datos); fuentes abiertas con adaptadores `SourceAdapter → RawCompany`, caché HTTP en BD, dedupe por dominio/nombre+distancia, `confidence_score` y trabajos en Actions lanzados desde la app |
 | [0008](docs/adr/0008-parseo-de-cv-en-request-y-cache-llm.md) | **LLM gratuito** (NVIDIA, OpenAI-compatible) con proveedores intercambiables; parseo del CV **en la request** (excepción acotada: una llamada, 120 s) y **caché de llamadas** por hash con contabilidad de coste |
@@ -92,20 +93,20 @@ apps/accounts/     login/logout, management/commands/ensure_user.py
 apps/catalog/      Category y Zone configurables en BD (sembradas por migración)
 apps/llm/          capa común (caché por hash, LLMCall con tokens y coste) + providers/ (nvidia gratuito, anthropic opcional)
 apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y parseo, formulario móvil
-apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany; overpass.py) · dedupe.py · discover
+apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany) · dedupe.py · filters.py · opening.py (horarios) · Explorar, ficha, Mapa, Datos · discover
 apps/enrichment/   Enrichment + CompanyPage · crawler.py (robots, ≤ 5 páginas) · services.py (extracción y puntuación) · profile.py (lo que usa la web) · enrich
+apps/tracking/     Favorite, Visit, Note · acciones de un toque (HTMX) y pestaña Favoritas
 apps/jobs/         JobRun + cliente de la API de GitHub (dispatch de workflows y estado)
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
-static/            css/app.css (compilado) · fonts/ · vendor/alpine.min.js · icons/
+static/            css/app.css (compilado) · fonts/ · vendor/ (Alpine, Leaflet, SortableJS) · icons/
 scripts/           tw.py (Tailwind standalone) · make_icons.py (PNG desde SVG)
 prompts/           prompts versionados (`cv_parse_v1`, `enrich_extract_v1`, `enrich_score_v1`)
 docs/adr/          decisiones de arquitectura
 .github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml
 ```
 
-Estructura prevista para las fases 5-7: `apps/tracking` (Favorite, Visit), `apps/routes` y
-`apps/offers`. `apps/core` se mantiene transversal.
+Estructura prevista para las fases 6-7: `apps/routes` y `apps/offers`. `apps/core` se mantiene transversal.
 
 ### Descubrimiento de empresas (fase 3)
 
@@ -129,6 +130,19 @@ Estructura prevista para las fases 5-7: `apps/tracking` (Favorite, Visit), `apps
    - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
 5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
    fuentes pasan a inactivas (no se borran).
+
+### Explorar, mapa y seguimiento (fase 5)
+
+- **Explorar** (`/`): búsqueda por nombre o servicio y filtros por encaje, categoría, zona,
+  estado, catalán, confianza, "abierto ahora" y favoritas; orden por encaje. Los filtros van en
+  la URL (se pueden recargar y compartir) y la lista se actualiza por HTMX, 20 en 20.
+- **Ficha** (`/empresa/<id>/`): encaje con justificación y gancho (con botón copiar), estado de un
+  toque, fecha/contacto/próxima acción, dirección y horario (real u oficina estimado), llamar,
+  Maps y web, lo que la IA extrajo de su web y notas con historial.
+- **Mapa** (`/mapa/`): Leaflet + OpenStreetMap, colores por encaje, mismos filtros, "mi ubicación".
+- **Favoritas** (`/favoritas/`): prioridad, nota rápida, arrastrar para ordenar (SortableJS, táctil)
+  y próximas acciones con fecha (atrasadas en rojo).
+- **Datos** (`/datos/`): estado del descubrimiento y del análisis con IA, cifras por categoría y fuente.
 
 ### Enriquecimiento y encaje (fase 4)
 
@@ -298,5 +312,5 @@ llamada); recalcular el `fit_score` al cambiar el perfil no repite ningún fetch
 MIT. Datos: © colaboradores de OpenStreetMap (ODbL); Foursquare OS Places (Apache 2.0);
 Ajuntament de Barcelona, Open Data BCN (CC-BY 4.0).
 
-Terceros: Plus Jakarta Sans (OFL, `static/fonts/OFL.txt`), Lucide (ISC), Alpine.js (MIT)
+Terceros: Plus Jakarta Sans (OFL, `static/fonts/OFL.txt`), Lucide (ISC), Alpine.js (MIT), Leaflet (BSD-2), SortableJS (MIT)
 y htmx (BSD) — ver [`static/vendor/LICENSES.md`](static/vendor/LICENSES.md).

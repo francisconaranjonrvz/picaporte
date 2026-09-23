@@ -1,0 +1,10 @@
+<form id="visit-form" class="grid grid-cols-2 gap-3" hx-post="{% url 'visit_update' company.pk %}" hx-target="#visit-form" hx-swap="outerHTML">
+  {% for field in form %}
+  <div class="{% if field.name == 'contact' or field.name == 'next_action' %}col-span-2{% endif %}">
+    <label class="field-label" for="{{ field.id_for_label }}">{{ field.label|capfirst }}</label>
+    {{ field.as_widget }}
+    {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+  </div>
+  {% endfor %}
+  <button type="submit" class="btn-primary col-span-2">Guardar seguimiento</button>
+</form>

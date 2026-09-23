@@ -1,0 +1,14 @@
+{# Estado de la empresa: un toque cambia el estado (y deja una nota en el historial). #}
+<div id="status-panel">
+  <div class="flex items-center justify-between">
+    <h2 class="font-bold">Estado</h2>
+    {% if visit %}<span class="badge {{ visit.badge }}">{{ visit.get_status_display }}</span>{% else %}<span class="badge badge-muted">Sin empezar</span>{% endif %}
+  </div>
+  <div class="mt-3 flex flex-wrap gap-2" role="group" aria-label="Cambiar estado">
+    {% for value, label in statuses %}
+    <button type="button" class="chip" aria-pressed="{% if visit.status == value %}true{% else %}false{% endif %}"
+            hx-post="{% url 'status_update' company.pk %}" hx-vals='{"status": "{{ value }}"}'
+            hx-target="#status-panel" hx-swap="outerHTML">{{ label }}</button>
+    {% endfor %}
+  </div>
+</div>

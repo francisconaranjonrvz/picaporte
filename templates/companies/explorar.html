@@ -1,97 +1,53 @@
 {% extends "base.html" %}
 {% load ui %}
 {% block content %}
-<header class="mb-4 flex items-center justify-between">
-  <div>
+{% url "datos" as datos_url %}
+<header class="mb-3 flex items-center justify-between gap-3">
+  <div class="min-w-0">
     <h1 class="text-2xl font-extrabold tracking-tight">Explorar</h1>
-    <p class="text-sm text-muted">Empresas de Barcelona donde llamar a la puerta.</p>
+    <p class="text-sm text-muted">{{ total_active }} empresas de Barcelona donde llamar a la puerta.</p>
   </div>
-  <span class="badge badge-primary">Fase 4</span>
+  {% btn href=datos_url variant="ghost" size="sm" aria_label="Estado de los datos" %}{% icon "database" "size-4" %}Datos{% endbtn %}
 </header>
 
-<div class="space-y-4">
-  {% card %}
-    <div class="flex items-center justify-between">
-      <h2 class="font-bold">Descubrimiento</h2>
-      {% if total %}<span class="badge badge-muted">{{ total }} empresas</span>{% endif %}
-    </div>
-    <div class="mt-3">{% include "jobs/_status.html" with job=discover_job kind="discover" %}</div>
-    <form hx-post="{% url 'job_trigger' 'discover' %}" hx-target="#job-status-discover" hx-swap="outerHTML" class="mt-3">
-      {% csrf_token %}
-      {% btn type="submit" size="md" cls="w-full" disabled=discover_job.is_active %}{% icon "search" "size-5" %}Buscar nuevas empresas{% endbtn %}
-    </form>
-    <p class="mt-2 text-xs text-muted">Lanza el workflow en GitHub Actions (también corre solo cada lunes). Tarda 1-3 minutos.</p>
-  {% endcard %}
+<form id="filters" action="{% url 'explorar' %}" method="get"
+      hx-get="{% url 'explorar' %}" hx-target="#company-list" hx-swap="outerHTML" hx-push-url="true"
+      hx-trigger="change, input changed delay:400ms from:#f-q, submit"
+      x-data="{ open: {% if form.active_count %}true{% else %}false{% endif %} }" class="space-y-2">
+  <div class="flex gap-2">
+    <label class="sr-only" for="f-q">Buscar</label>
+    <input id="f-q" name="q" type="search" class="field-input" placeholder="Nombre o servicio…" autocomplete="off"
+           value="{{ form.q.value|default:'' }}">
+    <button type="button" class="chip min-h-11 shrink-0" x-on:click="open = !open" x-bind:aria-expanded="open" aria-controls="filter-panel">
+      {% icon "sliders" "size-4" %}Filtros{% if form.active_count %} · {{ form.active_count }}{% endif %}
+    </button>
+  </div>
 
-  {% if total %}
-  {% card %}
-    <div class="flex items-center justify-between">
-      <h2 class="font-bold">Encaje con tu perfil</h2>
-      {% if enrichment.scored %}<span class="badge badge-muted">{{ enrichment.scored }} puntuadas</span>{% endif %}
+  <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+    {% for field in form %}{% if field.name == "open_now" or field.name == "favorites" %}
+    <label class="chip shrink-0 cursor-pointer has-[:checked]:border-action-fill has-[:checked]:bg-action-fill has-[:checked]:text-white">
+      <input type="checkbox" name="{{ field.html_name }}" value="on" class="sr-only"{% if field.value %} checked{% endif %}>
+      {% if field.name == "open_now" %}{% icon "clock" "size-4" %}{% else %}{% icon "heart" "size-4" %}{% endif %}{{ field.label }}
+    </label>
+    {% endif %}{% endfor %}
+  </div>
+
+  <div id="filter-panel" x-show="open" x-cloak x-transition.duration.150ms class="card grid grid-cols-2 gap-3">
+    {% for field in form %}{% if field.name != "q" and field.name != "open_now" and field.name != "favorites" %}
+    <div class="{% if field.name == 'sort' %}col-span-2{% endif %}">
+      <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+      <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="field-input px-3 text-sm">
+        {% for value, label in field.field.choices %}
+        <option value="{{ value }}"{% if field.value|stringformat:"s" == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </div>
-    <p class="mt-1 text-sm text-muted">
-      Lee la web de cada empresa (máx. 5 páginas, respetando robots.txt), la resume con IA y puntúa de 0 a 100 cuánto encaja contigo.
-      {{ enrichment.crawled }} webs leídas · {{ enrichment.extracted }} analizadas.
-    </p>
-    {% if not enrichment.profile_ready %}
-      <p class="mt-2 text-sm text-warning-ink">Para puntuar hace falta tu perfil: sube y analiza el CV en <a class="underline" href="{% url 'perfil' %}">Perfil</a>.</p>
-    {% elif enrichment.stale %}
-      <p class="mt-2 text-sm text-warning-ink">Tu perfil ha cambiado: {{ enrichment.stale }} empresa{{ enrichment.stale|pluralize }} con la puntuación anterior.</p>
+    {% endif %}{% endfor %}
+    {% if form.active_count %}
+    <a href="{% url 'explorar' %}" class="col-span-2 py-2 text-center text-sm font-semibold text-action-fill">Quitar filtros</a>
     {% endif %}
-    <div class="mt-3">{% include "jobs/_status.html" with job=enrich_job kind="enrich" %}</div>
-    <div class="mt-3 grid gap-2">
-      <form hx-post="{% url 'job_trigger' 'enrich' %}" hx-target="#job-status-enrich" hx-swap="outerHTML">
-        {% csrf_token %}<input type="hidden" name="mode" value="all">
-        {% btn type="submit" size="md" cls="w-full" disabled=enrich_job.is_active %}{% icon "sparkles" "size-5" %}Analizar webs y puntuar{% endbtn %}
-      </form>
-      {% if enrichment.stale %}
-      <form hx-post="{% url 'job_trigger' 'enrich' %}" hx-target="#job-status-enrich" hx-swap="outerHTML">
-        {% csrf_token %}<input type="hidden" name="mode" value="score">
-        {% btn type="submit" variant="secondary" size="md" cls="w-full" disabled=enrich_job.is_active %}Solo recalcular el encaje{% endbtn %}
-      </form>
-      {% endif %}
-    </div>
-    <p class="mt-2 text-xs text-muted">Corre en GitHub Actions (también cada noche): hasta 150 webs por ejecución, como mucho 45 minutos; lo que no quepa sigue la noche siguiente. Recalcular el encaje no vuelve a leer las webs.</p>
-  {% endcard %}
-  {% endif %}
+  </div>
+</form>
 
-  {% if top_matches %}
-  {% card %}
-    <h2 class="font-bold">Mejor encaje</h2>
-    <ul class="mt-2 divide-y divide-primary/40">
-      {% for e in top_matches %}
-      <li class="py-3">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="font-semibold">{{ e.company.name }}</p>
-            <p class="text-xs text-muted">{{ e.company.category.name|default:"Sin categoría" }}{% if e.company.zone %} · {{ e.company.zone.name }}{% endif %}</p>
-          </div>
-          <span class="badge {% if e.fit_score >= 70 %}badge-success{% elif e.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} shrink-0">{{ e.fit_score }}</span>
-        </div>
-        {% if e.fit_reason %}<p class="mt-1 text-sm text-muted">{{ e.fit_reason }}</p>{% endif %}
-        {% if e.hook %}<p class="mt-2 rounded-xl bg-bg p-3 text-sm italic">«{{ e.hook }}»</p>{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-    <p class="mt-2 text-xs text-muted">La lista completa, con filtros y mapa, llega en la fase 5.</p>
-  {% endcard %}
-  {% endif %}
-
-  {% if total %}
-  {% card %}
-    <h2 class="font-bold">Por categoría</h2>
-    <ul class="mt-2 divide-y divide-primary/40 text-sm">
-      {% for name, count in by_category %}
-      <li class="flex items-center justify-between py-2"><span>{{ name }}</span><span class="font-semibold">{{ count }}</span></li>
-      {% endfor %}
-    </ul>
-    <p class="mt-2 text-xs text-muted">{{ with_website }} con web · la lista con filtros y mapa llega en la fase 5.</p>
-    {% if by_source %}
-    <p class="mt-1 text-xs text-muted">Fuentes: {% for name, count in by_source %}{{ name }} {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
-    {% endif %}
-  {% endcard %}
-  {% else %}
-  {% include "components/empty_state.html" with icon="compass" title="Aún no hay empresas" text="Pulsa «Buscar nuevas empresas» para lanzar el primer descubrimiento (OpenStreetMap, Foursquare y el censo de locales de Barcelona)." %}
-  {% endif %}
-</div>
+<div class="mt-3">{% include "companies/_list.html" %}</div>
 {% endblock %}

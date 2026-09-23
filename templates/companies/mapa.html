@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load static ui %}
+{% block head %}<link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">{% endblock %}
+{% block content %}
+<header class="mb-3 flex items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-extrabold tracking-tight">Mapa</h1>
+    <p class="text-sm text-muted" id="map-count" aria-live="polite">Cargando empresas…</p>
+  </div>
+  <button type="button" id="locate" class="flex size-11 items-center justify-center rounded-full bg-surface text-action-fill shadow-soft" aria-label="Centrar en mi ubicación">{% icon "navigation" "size-5" %}</button>
+</header>
+
+<form id="map-filters" class="mb-3 space-y-2">
+  <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+    {% for field in form %}{% if field.name == "open_now" or field.name == "favorites" %}
+    <label class="chip shrink-0 cursor-pointer has-[:checked]:border-action-fill has-[:checked]:bg-action-fill has-[:checked]:text-white">
+      <input type="checkbox" name="{{ field.html_name }}" value="on" class="sr-only"{% if field.value %} checked{% endif %}>{{ field.label }}
+    </label>
+    {% endif %}{% endfor %}
+    {% for field in form %}{% if field.name == "category" or field.name == "score" %}
+    <label class="sr-only" for="{{ field.id_for_label }}">{{ field.label }}</label>
+    <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" class="chip shrink-0 pr-8">
+      {% for value, label in field.field.choices %}<option value="{{ value }}"{% if field.value|stringformat:"s" == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% endif %}{% endfor %}
+  </div>
+</form>
+
+<div id="map" class="h-[calc(100dvh-15rem)] min-h-80 overflow-hidden rounded-2xl shadow-soft"
+     data-url="{% url 'mapa_datos' %}" role="region" aria-label="Mapa de empresas"></div>
+<p class="mt-2 text-xs text-muted">
+  <span class="inline-block size-2.5 rounded-full bg-success-ink align-middle"></span> encaje 70+ ·
+  <span class="inline-block size-2.5 rounded-full bg-warning-ink align-middle"></span> 40-69 ·
+  <span class="inline-block size-2.5 rounded-full bg-action-fill align-middle"></span> sin puntuar o menos · borde grueso = favorita
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
+<script>
+  (() => {
+    const el = document.getElementById("map");
+    const form = document.getElementById("map-filters");
+    const count = document.getElementById("map-count");
+    const css = getComputedStyle(document.documentElement);
+    const color = (name) => css.getPropertyValue(`--color-${name}`).trim();
+    const map = L.map(el, { zoomControl: false }).setView([41.395, 2.17], 13);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+    const layer = L.layerGroup().addTo(map);
+    const escape = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+    async function load() {
+      const params = new URLSearchParams(new FormData(form));
+      history.replaceState(null, "", `?${params}`);
+      const response = await fetch(`${el.dataset.url}?${params}`, { headers: { Accept: "application/json" } });
+      const { points, truncated } = await response.json();
+      layer.clearLayers();
+      for (const p of points) {
+        const fill = p.score >= 70 ? color("success-ink") : p.score >= 40 ? color("warning-ink") : color("action-fill");
+        L.circleMarker([p.lat, p.lng], {
+          radius: 8, color: p.favorite ? color("danger-ink") : "#fff", weight: p.favorite ? 4 : 2,
+          fillColor: fill, fillOpacity: 0.9,
+        })
+          .bindPopup(
+            `<strong>${escape(p.name)}</strong><br>${escape(p.category)}` +
+            (p.score !== null ? ` · encaje ${p.score}` : "") +
+            (p.status ? `<br>${escape(p.status)}` : "") +
+            `<br><a href="${p.url}">Ver ficha</a>`
+          )
+          .addTo(layer);
+      }
+      count.textContent = `${points.length} empresas en el mapa${truncated ? " (se muestran las primeras)" : ""}`;
+    }
+
+    form.addEventListener("change", load);
+    document.getElementById("locate").addEventListener("click", () => {
+      navigator.geolocation?.getCurrentPosition(
+        ({ coords }) => {
+          map.setView([coords.latitude, coords.longitude], 16);
+          L.circleMarker([coords.latitude, coords.longitude], { radius: 6, color: color("action"), fillOpacity: 1 }).addTo(map);
+        },
+        () => window.dispatchEvent(new CustomEvent("toast", { detail: "No se pudo obtener tu ubicación." }))
+      );
+    });
+    load();
+  })();
+</script>
+{% endblock %}

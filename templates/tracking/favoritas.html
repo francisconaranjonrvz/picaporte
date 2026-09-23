@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load static ui %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="text-2xl font-extrabold tracking-tight">Favoritas</h1>
+  <p class="text-sm text-muted">Tu lista corta. Arrastra {% icon "grip" "inline size-4 align-text-bottom" %} para ordenarla.</p>
+</header>
+
+{% if upcoming %}
+{% card %}
+  <h2 class="font-bold">Próximas acciones</h2>
+  <ul class="mt-2 divide-y divide-primary/40 text-sm">
+    {% for visit in upcoming %}
+    <li class="flex items-center justify-between gap-3 py-2">
+      <a class="min-w-0" href="{% url 'ficha' visit.company_id %}">
+        <span class="block truncate font-semibold">{{ visit.company.name }}</span>
+        <span class="block truncate text-muted">{{ visit.next_action|default:"Seguimiento" }}</span>
+      </a>
+      <span class="badge {% if visit.next_action_on < today %}badge-danger{% elif visit.next_action_on == today %}badge-warning{% else %}badge-muted{% endif %} shrink-0">{{ visit.next_action_on|date:"j M" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+{% endcard %}
+<div class="h-4"></div>
+{% endif %}
+
+{% if favorites %}
+<ul id="favorites" class="space-y-3" data-reorder-url="{% url 'favorites_reorder' %}">
+  {% for fav in favorites %}
+  {% with company=fav.company e=fav.company.enrichment v=fav.company.visit %}
+  <li class="card flex items-start gap-2" data-id="{{ company.pk }}">
+    <button type="button" class="drag-handle -ml-1 flex size-11 shrink-0 cursor-grab items-center justify-center text-muted active:cursor-grabbing" aria-label="Arrastrar para reordenar {{ company.name }}">{% icon "grip" "size-5" %}</button>
+    <div class="min-w-0 flex-1">
+      <div class="flex items-start justify-between gap-2">
+        <a href="{% url 'ficha' company.pk %}" class="min-w-0">
+          <h2 class="truncate font-bold">{{ company.name }}</h2>
+          <p class="truncate text-sm text-muted">{{ company.category.name|default:"Sin categoría" }}{% if company.zone %} · {{ company.zone.name }}{% endif %}</p>
+        </a>
+        {% if e.fit_score is not None %}<span class="badge {% if e.fit_score >= 70 %}badge-success{% elif e.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} shrink-0">{{ e.fit_score }}</span>{% endif %}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <label class="sr-only" for="prio-{{ company.pk }}">Prioridad</label>
+        <select id="prio-{{ company.pk }}" name="priority" class="field-input min-h-9 w-auto rounded-full px-3 py-0 text-sm"
+                hx-post="{% url 'favorite_update' company.pk %}" hx-trigger="change" hx-swap="none">
+          {% for value, label in priorities %}<option value="{{ value }}"{% if fav.priority == value %} selected{% endif %}>Prioridad {{ label|lower }}</option>{% endfor %}
+        </select>
+        {% if v and v.status != "pendiente" %}<span class="badge {{ v.badge }}">{{ v.get_status_display }}</span>{% endif %}
+      </div>
+      <label class="sr-only" for="fav-note-{{ company.pk }}">Nota rápida</label>
+      <input id="fav-note-{{ company.pk }}" name="note" value="{{ fav.note }}" maxlength="280" placeholder="Nota rápida…"
+             class="mt-2 w-full border-0 border-b border-dashed border-primary bg-transparent px-0 py-1 text-sm focus:border-action focus:ring-0"
+             hx-post="{% url 'favorite_update' company.pk %}" hx-trigger="change" hx-swap="none">
+    </div>
+  </li>
+  {% endwith %}
+  {% endfor %}
+</ul>
+{% else %}
+  {% url "explorar" as explorar_url %}
+  {% include "components/empty_state.html" with icon="heart" title="Aún no hay favoritas" text="Toca el corazón de una empresa en Explorar o en su ficha para guardarla aquí." cta_label="Ir a Explorar" cta_href=explorar_url %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if favorites %}
+<script src="{% static 'vendor/sortable.min.js' %}"></script>
+<script>
+  (() => {
+    const list = document.getElementById("favorites");
+    Sortable.create(list, {
+      handle: ".drag-handle",
+      animation: 180,
+      onEnd() {
+        const ids = [...list.children].map((li) => li.dataset.id).join(",");
+        htmx.ajax("POST", list.dataset.reorderUrl, { values: { ids }, swap: "none" });
+      },
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

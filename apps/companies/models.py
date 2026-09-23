@@ -1,5 +1,7 @@
 """Empresas descubiertas, sus registros por fuente y la caché de respuestas HTTP."""
 
+from urllib.parse import quote_plus
+
 from django.db import models
 from django.utils import timezone
 
@@ -69,9 +71,18 @@ class Company(models.Model):
 
     @property
     def maps_url(self) -> str:
-        if self.lat is None or self.lng is None:
-            return ""
-        return f"https://www.google.com/maps/search/?api=1&query={self.lat},{self.lng}"
+        """Enlace de Google Maps: por coordenadas si las hay; si no, por nombre y dirección."""
+        if self.lat is not None and self.lng is not None:
+            return f"https://www.google.com/maps/search/?api=1&query={self.lat},{self.lng}"
+        if self.address:
+            query = quote_plus(f"{self.name}, {self.address}, Barcelona")
+            return f"https://www.google.com/maps/search/?api=1&query={query}"
+        return ""
+
+    @property
+    def tel_url(self) -> str:
+        digits = "".join(ch for ch in self.phone if ch.isdigit() or ch == "+")
+        return f"tel:{digits}" if digits else ""
 
 
 class SourceRecord(models.Model):

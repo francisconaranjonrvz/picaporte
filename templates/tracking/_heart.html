@@ -1,0 +1,7 @@
+{% load ui %}
+{# Corazón de favorita (acción de un toque). Se reemplaza a sí mismo tras el POST. #}
+<button type="button" class="flex size-11 shrink-0 items-center justify-center rounded-full transition duration-150 active:scale-90 {% if is_favorite %}bg-danger text-danger-ink{% else %}bg-primary/50 text-action-fill{% endif %}"
+        hx-post="{% url 'favorite_toggle' company.pk %}" hx-swap="outerHTML"
+        aria-pressed="{{ is_favorite|yesno:'true,false' }}" aria-label="{% if is_favorite %}Quitar de favoritas{% else %}Añadir a favoritas{% endif %}: {{ company.name }}">
+  {% if is_favorite %}{% icon "heart-fill" "size-5" %}{% else %}{% icon "heart" "size-5" %}{% endif %}
+</button>

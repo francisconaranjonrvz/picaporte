@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.companies",
     "apps.jobs",
     "apps.enrichment",
+    "apps.tracking",
 ]
 
 MIDDLEWARE = [

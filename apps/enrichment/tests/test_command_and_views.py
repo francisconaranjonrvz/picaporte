@@ -70,8 +70,8 @@ def test_comando_enrich_marca_fallo(monkeypatch):
     assert "Neon caído" in job.error
 
 
-def test_explorar_muestra_encaje_y_mejores_empresas(auth_client, user):
-    resp = auth_client.get(reverse("explorar"))
+def test_datos_muestra_el_analisis_y_explorar_ordena_por_encaje(auth_client, user):
+    resp = auth_client.get(reverse("datos"))
     assert "Encaje con tu perfil" not in resp.text  # sin empresas no hay tarjeta
 
     buzz = Company.objects.create(name="Buzz", website="https://buzz.es")
@@ -87,15 +87,18 @@ def test_explorar_muestra_encaje_y_mejores_empresas(auth_client, user):
     )
     Enrichment.objects.create(company=cowork, crawl_status="no_website")
 
-    resp = auth_client.get(reverse("explorar"))
+    resp = auth_client.get(reverse("datos"))
     assert "Encaje con tu perfil" in resp.text
     assert "sube y analiza el CV" in resp.text  # sin perfil no se puntúa
-    assert "Mejor encaje" in resp.text
-    assert "Vi vuestra campaña para Wallbox." in resp.text
     assert 'hx-post="/jobs/enrich/run"' in resp.text
 
-    Profile.objects.create(user=user, full_name="Laura", skills=["Canva"])
     resp = auth_client.get(reverse("explorar"))
+    html = resp.text
+    assert html.index(">Buzz</h2>") < html.index(">Cowork</h2>")  # primero el mejor encaje
+    assert "Hace eventos de marca." in html
+
+    Profile.objects.create(user=user, full_name="Laura", skills=["Canva"])
+    resp = auth_client.get(reverse("datos"))
     assert "Tu perfil ha cambiado: 1 empresa con la puntuación anterior." in resp.text
     assert "Solo recalcular el encaje" in resp.text
 

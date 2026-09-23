@@ -6,17 +6,12 @@ from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from apps.tracking.models import Visit
+
 from .design import PAIRS, TOKENS
 
-# Estados de visita (fase 5). Se muestran ya en /styleguide para fijar sus colores.
-VISIT_STATES = [
-    ("pendiente", "Pendiente", "badge-muted"),
-    ("planificado", "Planificado", "badge-primary"),
-    ("visitado", "Visitado", "badge-success"),
-    ("cv_entregado", "CV entregado", "badge-success"),
-    ("volver", "Volver", "badge-warning"),
-    ("descartado", "Descartado", "badge-danger"),
-]
+# Estados de visita del modelo real, con su badge (se muestran en /styleguide).
+VISIT_STATES = [(value, label, Visit.BADGES[value]) for value, label in Visit.Status.choices]
 
 # Pestañas de la barra inferior: (url_name, etiqueta, icono, fase en la que llega).
 TABS = [
@@ -56,14 +51,6 @@ def _placeholder(request, tab: str):
         "text": f"Esta pestaña llega en la fase {phase}. De momento puedes explorar el design system.",
     }
     return render(request, "core/placeholder.html", context)
-
-
-def mapa(request):
-    return _placeholder(request, "mapa")
-
-
-def favoritas(request):
-    return _placeholder(request, "favoritas")
 
 
 def ruta(request):

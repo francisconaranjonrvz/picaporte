@@ -193,9 +193,9 @@ def test_boton_y_estado_por_htmx(auth_client, token, monkeypatch):
     assert "osm: 3 nuevas" in resp.text
 
 
-def test_explorar_muestra_cifras_y_estado(auth_client, db):
-    resp = auth_client.get(reverse("explorar"))
-    assert "Aún no hay empresas" in resp.text
+def test_datos_muestra_cifras_y_estado(auth_client, db):
+    assert "Aún no hay empresas" in auth_client.get(reverse("explorar")).text
+    resp = auth_client.get(reverse("datos"))
     assert "Todavía no se ha buscado" in resp.text
 
     buzz = Company.objects.create(name="Buzz", website="https://buzz.com")
@@ -203,7 +203,7 @@ def test_explorar_muestra_cifras_y_estado(auth_client, db):
     Company.objects.create(name="Retirada", is_active=False)
     for source, external_id in (("osm", "node/1"), ("foursquare", "fsq/1")):
         buzz.records.create(source=source, external_id=external_id, name="Buzz")
-    resp = auth_client.get(reverse("explorar"))
+    resp = auth_client.get(reverse("datos"))
     assert "2 empresas" in resp.text  # la inactiva no cuenta
     assert "Sin categoría" in resp.text
     assert "1 con web" in resp.text
