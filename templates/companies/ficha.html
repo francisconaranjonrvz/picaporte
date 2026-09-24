@@ -13,17 +13,17 @@
 
 <div class="space-y-4">
   {# Encaje con el perfil #}
-  {% if enrichment.fit_score is not None %}
+  {% if score %}
   {% card %}
     <div class="flex items-center justify-between gap-3">
       <h2 class="font-bold">Encaje con tu perfil</h2>
-      {% include "enrichment/_score_badge.html" with e=enrichment %}
+      {% include "enrichment/_score_badge.html" with e=score %}
     </div>
-    {% if enrichment.verdict %}<p class="mt-1 text-sm font-semibold">{{ enrichment.verdict.advice }}</p>{% endif %}
-    {% if enrichment.fit_reason %}<p class="mt-2 text-sm text-muted">{{ enrichment.fit_reason }}</p>{% endif %}
-    {% if enrichment.breakdown_rows %}
+    <p class="mt-1 text-sm font-semibold">{{ score.verdict.advice }}</p>
+    {% if score.fit_reason %}<p class="mt-2 text-sm text-muted">{{ score.fit_reason }}</p>{% endif %}
+    {% if score.breakdown_rows %}
     <dl class="mt-3 space-y-2 text-sm">
-      {% for row in enrichment.breakdown_rows %}
+      {% for row in score.breakdown_rows %}
       <div>
         <div class="flex justify-between gap-2"><dt class="text-muted">{{ row.label }}</dt><dd class="font-semibold">{{ row.points }}/{{ row.max }}</dd></div>
         <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-primary/50" aria-hidden="true"><div class="h-full rounded-full bg-action" style="width: {{ row.pct }}%"></div></div>
@@ -31,10 +31,10 @@
       {% endfor %}
     </dl>
     {% endif %}
-    {% if enrichment.hook %}
+    {% if score.hook %}
     <div class="mt-3 rounded-xl bg-bg p-3" x-data="{ copied: false }">
       <p class="text-xs font-semibold uppercase tracking-wide text-action-fill">Para presentarte</p>
-      <p class="mt-1 text-sm italic" x-ref="hook">«{{ enrichment.hook }}»</p>
+      <p class="mt-1 text-sm italic" x-ref="hook">«{{ score.hook }}»</p>
       <button type="button" class="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-action-fill"
               x-on:click="navigator.clipboard.writeText($refs.hook.innerText.replace(/^«|»$/g, '')); copied = true; setTimeout(() => copied = false, 1500)">
         {% icon "copy" "size-4" %}<span x-text="copied ? 'Copiado' : 'Copiar'">Copiar</span>

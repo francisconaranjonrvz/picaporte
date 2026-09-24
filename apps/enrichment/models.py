@@ -4,11 +4,15 @@ Dos etapas independientes, cada una con su versión de prompt:
 
 1. **Extracción** (depende solo de la web): servicios, clientes, tamaño, catalán,
    resumen… Se rehace únicamente si cambian las páginas (`pages_hash`).
-2. **Puntuación** (perfil + datos extraídos): `fit_score`, justificación y gancho.
-   Al cambiar el perfil solo se repite esta etapa (`profile_hash`), sin rastrear
-   ni extraer de nuevo.
+2. **Puntuación** (perfil de cada usuario + datos extraídos): `FitScore`, con nota,
+   desglose, justificación y gancho. Al cambiar un perfil solo se repite esta etapa
+   para ese usuario (`profile_hash`), sin rastrear ni extraer de nuevo.
+
+El rastreo y la extracción son compartidos (la web es la misma para todos); la
+puntuación es de cada usuario.
 """
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -106,26 +110,53 @@ class Enrichment(models.Model):
         "extracciones fallidas seguidas", default=0
     )
 
-    # Puntuación (IA, perfil + empresa)
-    fit_score = models.PositiveSmallIntegerField("encaje (0-100)", null=True, blank=True)
-    fit_breakdown = models.JSONField("encaje por criterios", default=dict, blank=True)
-    fit_reason = models.TextField("justificación", blank=True)
-    hook = models.TextField("gancho para presentarse", blank=True)
-    scored_at = models.DateTimeField(null=True, blank=True)
-    profile_hash = models.CharField(max_length=64, blank=True)
-    scoring_model = models.CharField(max_length=64, blank=True)
-    scoring_prompt_version = models.CharField(max_length=64, blank=True)
-
     error = models.CharField("último error de IA", max_length=300, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "enriquecimiento"
         verbose_name_plural = "enriquecimientos"
-        indexes = [models.Index(fields=["-fit_score"])]
 
     def __str__(self) -> str:
-        return f"{self.company} · {self.fit_score if self.fit_score is not None else '—'}"
+        return f"{self.company} · {self.get_crawl_status_display()}"
+
+    @property
+    def needs_extraction(self) -> bool:
+        """Páginas nuevas sin analizar. Tras `MAX_EXTRACTION_ATTEMPTS` fallos se deja de
+        intentar (y se puntúa sin datos extraídos) hasta el próximo rastreo."""
+        return (
+            self.crawl_status == self.CrawlStatus.OK
+            and self.extracted_pages_hash != self.pages_hash
+            and self.extraction_attempts < MAX_EXTRACTION_ATTEMPTS
+        )
+
+
+class FitScore(models.Model):
+    """Encaje de una empresa con el perfil de un usuario (ranking personal)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="fit_scores", on_delete=models.CASCADE
+    )
+    company = models.ForeignKey(Company, related_name="fit_scores", on_delete=models.CASCADE)
+    fit_score = models.PositiveSmallIntegerField("encaje (0-100)")
+    fit_breakdown = models.JSONField("encaje por criterios", default=dict, blank=True)
+    fit_reason = models.TextField("justificación", blank=True)
+    hook = models.TextField("gancho para presentarse", blank=True)
+    scored_at = models.DateTimeField(default=timezone.now)
+    profile_hash = models.CharField(max_length=64, blank=True)
+    scoring_model = models.CharField(max_length=64, blank=True)
+    scoring_prompt_version = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "company"], name="unique_user_fit_score")
+        ]
+        indexes = [models.Index(fields=["user", "-fit_score"])]
+        verbose_name = "encaje"
+        verbose_name_plural = "encajes"
+
+    def __str__(self) -> str:
+        return f"{self.company} · {self.fit_score} ({self.user})"
 
     @property
     def verdict(self):
@@ -138,13 +169,3 @@ class Enrichment(models.Model):
         from .ranking import breakdown_rows
 
         return breakdown_rows(self.fit_breakdown)
-
-    @property
-    def needs_extraction(self) -> bool:
-        """Páginas nuevas sin analizar. Tras `MAX_EXTRACTION_ATTEMPTS` fallos se deja de
-        intentar (y se puntúa sin datos extraídos) hasta el próximo rastreo."""
-        return (
-            self.crawl_status == self.CrawlStatus.OK
-            and self.extracted_pages_hash != self.pages_hash
-            and self.extraction_attempts < MAX_EXTRACTION_ATTEMPTS
-        )

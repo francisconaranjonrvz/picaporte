@@ -22,9 +22,9 @@ class ImportForm(forms.Form):
 
 
 FILTERS = {
-    "": ("Activas", lambda qs: active_offers()),
-    "empresa": ("En tus empresas", lambda qs: active_offers().filter(company__isnull=False)),
-    "todas": ("Todas", lambda qs: qs),
+    "": ("Activas", lambda user: active_offers(user)),
+    "empresa": ("En tus empresas", lambda user: active_offers(user).filter(company__isnull=False)),
+    "todas": ("Todas", lambda user: JobOffer.objects.filter(user=user)),
 }
 
 
@@ -32,7 +32,7 @@ FILTERS = {
 def ofertas(request):
     key = request.GET.get("ver", "")
     key = key if key in FILTERS else ""
-    qs = FILTERS[key][1](JobOffer.objects.all()).select_related("company")
+    qs = FILTERS[key][1](request.user).select_related("company")
     page = Paginator(qs, 30).get_page(request.GET.get("page"))
     context = {
         "title": "Ofertas",
@@ -41,9 +41,9 @@ def ofertas(request):
         "filters": [(k, label) for k, (label, _) in FILTERS.items()],
         "current": key,
         "counts": {
-            "total": JobOffer.objects.count(),
-            "active": active_offers().count(),
-            "matched": active_offers().filter(company__isnull=False).count(),
+            "total": JobOffer.objects.filter(user=request.user).count(),
+            "active": active_offers(request.user).count(),
+            "matched": active_offers(request.user).filter(company__isnull=False).count(),
         },
     }
     return render(request, "offers/ofertas.html", context)
@@ -64,7 +64,7 @@ def importar(request):
     except ImportFormatError as exc:
         messages.error(request, str(exc))
         return redirect("ofertas")
-    stats = services.import_offers(result)
+    stats = services.import_offers(request.user, result)
     messages.success(
         request,
         f"{stats.total} ofertas ({stats.created} nuevas) · {stats.matched} cruzadas con "
@@ -75,6 +75,6 @@ def importar(request):
 
 @require_POST
 def recruzar(request):
-    matched = services.rematch_all()
+    matched = services.rematch_all(request.user)
     messages.success(request, f"Cruce actualizado: {matched} ofertas con empresa.")
     return redirect("ofertas")

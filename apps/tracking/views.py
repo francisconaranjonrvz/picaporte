@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.companies.models import Company
+from apps.companies.personal import for_user
 
 from . import services
 from .forms import VisitForm
@@ -26,7 +27,7 @@ def _toast(response: HttpResponse, message: str) -> HttpResponse:
 @require_POST
 def favorite_toggle(request, pk):
     company = _company(pk)
-    favorite = services.toggle_favorite(company)
+    favorite = services.toggle_favorite(request.user, company)
     response = render(
         request, "tracking/_heart.html", {"company": company, "is_favorite": favorite is not None}
     )
@@ -39,7 +40,7 @@ def status_update(request, pk):
     status = request.POST.get("status", "")
     if status not in Visit.Status.values:
         return HttpResponseBadRequest("Estado desconocido")
-    visit = services.set_status(company, status)
+    visit = services.set_status(request.user, company, status)
     response = render(
         request,
         "tracking/_status_panel.html",
@@ -54,7 +55,7 @@ def status_update(request, pk):
 @require_POST
 def visit_update(request, pk):
     company = _company(pk)
-    visit = services.visit_for(company)
+    visit = services.visit_for(request.user, company)
     form = VisitForm(request.POST, instance=visit)
     if form.is_valid():
         form.save()
@@ -73,9 +74,11 @@ def visit_update(request, pk):
 @require_POST
 def note_add(request, pk):
     company = _company(pk)
-    services.add_note(company, request.POST.get("text", ""))
+    services.add_note(request.user, company, request.POST.get("text", ""))
     return render(
-        request, "tracking/_notes.html", {"company": company, "notes": company.notes.all()[:50]}
+        request,
+        "tracking/_notes.html",
+        {"company": company, "notes": services.notes_for(request.user, company)},
     )
 
 
@@ -83,20 +86,35 @@ def note_add(request, pk):
 def notes(request, pk):
     company = _company(pk)
     return render(
-        request, "tracking/_notes.html", {"company": company, "notes": company.notes.all()[:50]}
+        request,
+        "tracking/_notes.html",
+        {"company": company, "notes": services.notes_for(request.user, company)},
     )
 
 
 @require_GET
 def favoritas(request):
     favorites = list(
-        Favorite.objects.select_related(
-            "company", "company__category", "company__zone", "company__enrichment", "company__visit"
+        Favorite.objects.filter(user=request.user).select_related(
+            "company", "company__category", "company__zone", "company__enrichment"
         )
     )
+    # Encaje y estado del usuario en cada favorita (company.score / company.visit).
+    companies = {
+        c.pk: c
+        for c in for_user(
+            Company.objects.filter(pk__in=[f.company_id for f in favorites]), request.user
+        )
+    }
+    for favorite in favorites:
+        favorite.company = companies.get(favorite.company_id, favorite.company)
     today = timezone.localdate()
     upcoming = (
-        Visit.objects.filter(next_action_on__isnull=False, company__favorite__isnull=False)
+        Visit.objects.filter(
+            user=request.user,
+            next_action_on__isnull=False,
+            company__favorites__user=request.user,
+        )
         .exclude(status=Visit.Status.DISCARDED)
         .select_related("company")
         .order_by("next_action_on")[:5]
@@ -121,13 +139,13 @@ def favorites_reorder(request):
         ids = [int(x) for x in request.POST.get("ids", "").split(",") if x]
     except ValueError:
         return HttpResponseBadRequest("ids no válidos")
-    services.reorder_favorites(ids)
+    services.reorder_favorites(request.user, ids)
     return HttpResponse(status=204)
 
 
 @require_POST
 def favorite_update(request, pk):
-    favorite = get_object_or_404(Favorite, company_id=pk)
+    favorite = get_object_or_404(Favorite, user=request.user, company_id=pk)
     priority = request.POST.get("priority")
     if priority is not None:
         if priority not in Favorite.Priority.values:

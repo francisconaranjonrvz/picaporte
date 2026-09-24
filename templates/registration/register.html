@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load ui %}
+{% block title %}Crear cuenta{% endblock %}
+{% block content %}
+<div class="flex min-h-[calc(100dvh-3rem)] flex-col justify-center gap-6">
+  <header class="flex flex-col items-center gap-3 text-center">
+    <span class="flex size-16 items-center justify-center rounded-2xl bg-action-fill text-white shadow-soft">{% icon "door-open" "size-8" %}</span>
+    <div>
+      <h1 class="text-2xl font-extrabold tracking-tight">Crear cuenta</h1>
+      <p class="text-sm text-muted">Sube tu CV y Picaporte te busca empresas de Barcelona donde llamar a la puerta.</p>
+    </div>
+  </header>
+
+  {% card %}
+    {% if closed %}
+      <p class="text-sm">El registro está cerrado de momento: se ha llegado al número máximo de cuentas.</p>
+    {% else %}
+    <form method="post" action="{% url 'register' %}" class="space-y-4" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="flex items-start gap-2 rounded-2xl bg-danger px-4 py-3 text-sm text-danger-ink" role="alert">
+          {% icon "circle-alert" "mt-0.5 size-4 shrink-0" %}
+          <span>{{ form.non_field_errors.0 }}</span>
+        </div>
+      {% endif %}
+      {% include "components/field.html" with field=form.username %}
+      {% include "components/field.html" with field=form.password1 %}
+      {% include "components/field.html" with field=form.password2 %}
+      {{ form.website }}
+      {% btn type="submit" size="lg" %}{% icon "check" "size-5" %}Crear cuenta{% endbtn %}
+    </form>
+    <p class="mt-3 text-xs text-muted">Tu perfil, tu ranking, tus favoritas y tus rutas son solo tuyos. Picaporte nunca contacta con ninguna empresa por ti.</p>
+    {% endif %}
+  {% endcard %}
+
+  <p class="text-center text-sm text-muted">¿Ya tienes cuenta? <a class="font-semibold text-action-fill underline-offset-2 hover:underline" href="{% url 'login' %}">Entrar</a></p>
+</div>
+{% endblock %}

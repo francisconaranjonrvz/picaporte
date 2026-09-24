@@ -6,6 +6,7 @@ import pytest
 from django.urls import reverse
 
 from apps.companies.models import Company
+from apps.core.testing import owner
 from apps.tracking import services
 from apps.tracking.models import Favorite, Note, Visit
 
@@ -21,28 +22,28 @@ def _trigger(resp):
 
 def test_favorita_se_anade_al_final_y_se_quita(db):
     a, b = Company.objects.create(name="A"), Company.objects.create(name="B")
-    fa = services.toggle_favorite(a)
-    fb = services.toggle_favorite(b)
+    fa = services.toggle_favorite(owner(), a)
+    fb = services.toggle_favorite(owner(), b)
     assert (fa.position, fb.position) == (1, 2)
-    assert services.toggle_favorite(a) is None
+    assert services.toggle_favorite(owner(), a) is None
     assert list(Favorite.objects.values_list("company__name", flat=True)) == ["B"]
 
 
 def test_reordenar_ignora_ids_ajenos_y_repetidos(db):
     companies = [Company.objects.create(name=n) for n in "ABC"]
     for c in companies:
-        services.toggle_favorite(c)
+        services.toggle_favorite(owner(), c)
     a, b, c = companies
     ajena = Company.objects.create(name="No favorita")
 
-    assert services.reorder_favorites([c.pk, ajena.pk, a.pk, c.pk, b.pk]) == 3
+    assert services.reorder_favorites(owner(), [c.pk, ajena.pk, a.pk, c.pk, b.pk]) == 3
     assert list(Favorite.objects.values_list("company__name", flat=True)) == ["C", "A", "B"]
 
 
 def test_cambiar_estado_deja_nota_solo_si_cambia(sol):
-    services.set_status(sol, Visit.Status.PLANNED)
-    services.set_status(sol, Visit.Status.PLANNED)
-    services.set_status(sol, Visit.Status.CV_DELIVERED)
+    services.set_status(owner(), sol, Visit.Status.PLANNED)
+    services.set_status(owner(), sol, Visit.Status.PLANNED)
+    services.set_status(owner(), sol, Visit.Status.CV_DELIVERED)
     assert Visit.objects.get(company=sol).status == "cv_entregado"
     assert list(Note.objects.values_list("text", flat=True)) == [
         "Estado: CV entregado",
@@ -51,8 +52,8 @@ def test_cambiar_estado_deja_nota_solo_si_cambia(sol):
 
 
 def test_notas_vacias_no_se_guardan(sol):
-    assert services.add_note(sol, "   ") is None
-    assert services.add_note(sol, " Hablé con Marta ").text == "Hablé con Marta"
+    assert services.add_note(owner(), sol, "   ") is None
+    assert services.add_note(owner(), sol, " Hablé con Marta ").text == "Hablé con Marta"
 
 
 def test_corazon_por_htmx(auth_client, sol):
@@ -102,9 +103,10 @@ def test_pagina_de_favoritas(auth_client, db):
     assert "Aún no hay favoritas" in auth_client.get(reverse("favoritas")).text
 
     a, b = Company.objects.create(name="Agencia A"), Company.objects.create(name="Agencia B")
-    services.toggle_favorite(a)
-    services.toggle_favorite(b)
+    services.toggle_favorite(owner(), a)
+    services.toggle_favorite(owner(), b)
     Visit.objects.create(
+        user=owner(),
         company=b,
         next_action="Volver con portfolio",
         next_action_on=date.today() - timedelta(days=1),
@@ -120,8 +122,8 @@ def test_pagina_de_favoritas(auth_client, db):
 
 def test_reordenar_y_editar_favorita_por_post(auth_client, db):
     a, b = Company.objects.create(name="A"), Company.objects.create(name="B")
-    services.toggle_favorite(a)
-    services.toggle_favorite(b)
+    services.toggle_favorite(owner(), a)
+    services.toggle_favorite(owner(), b)
 
     resp = auth_client.post(reverse("favorites_reorder"), {"ids": f"{b.pk},{a.pk}"})
     assert resp.status_code == 204
@@ -151,3 +153,21 @@ def test_todo_requiere_login(client, sol):
     for name in ("favorite_toggle", "status_update", "visit_update", "note_add"):
         assert client.post(reverse(name, args=[sol.pk])).status_code == 302
     assert client.get(reverse("favoritas")).status_code == 302
+
+
+def test_cada_cuenta_ve_solo_lo_suyo(client, sol, other_user):
+    """Favoritas, estados y notas son de cada usuario: la otra cuenta no ve nada."""
+    services.toggle_favorite(owner(), sol)
+    services.set_status(owner(), sol, Visit.Status.CV_DELIVERED)
+    services.add_note(owner(), sol, "Nota privada de Laura")
+
+    client.force_login(other_user)
+    assert "Aún no hay favoritas" in client.get(reverse("favoritas")).text
+    ficha = client.get(reverse("ficha", args=[sol.pk])).text
+    assert "Nota privada de Laura" not in ficha
+    assert 'aria-pressed="false"' in ficha
+    resp = client.post(reverse("favorite_update", args=[sol.pk]), {"priority": "alta"})
+    assert resp.status_code == 404  # la favorita de otra cuenta no existe para esta
+
+    client.post(reverse("favorite_toggle", args=[sol.pk]))
+    assert Favorite.objects.filter(company=sol).count() == 2  # una por cuenta

@@ -10,7 +10,8 @@ from apps.catalog.models import Category, Zone
 from apps.companies import filters as filters_module
 from apps.companies.filters import CompanyFilter
 from apps.companies.models import Company
-from apps.enrichment.models import Enrichment
+from apps.core.testing import owner
+from apps.enrichment.models import Enrichment, FitScore
 from apps.tracking.models import Favorite, Visit
 
 
@@ -25,15 +26,16 @@ def _company(name, score=None, category=None, zone=None, catalan="desconocido", 
         Enrichment.objects.create(
             company=company,
             crawl_status="ok",
-            fit_score=score,
             requires_catalan=catalan,
             services=["eventos corporativos"],
         )
+    if score is not None:
+        FitScore.objects.create(user=owner(), company=company, fit_score=score)
     return company
 
 
 def _names(data):
-    form = CompanyFilter(data)
+    form = CompanyFilter(data, user=owner())
     return [c.name for c in form.apply()]
 
 
@@ -67,8 +69,8 @@ def test_filtros_basicos(companies):
 
 
 def test_filtros_de_seguimiento(companies):
-    Favorite.objects.create(company=companies["c"])
-    Visit.objects.create(company=companies["b"], status=Visit.Status.CV_DELIVERED)
+    Favorite.objects.create(user=owner(), company=companies["c"])
+    Visit.objects.create(user=owner(), company=companies["b"], status=Visit.Status.CV_DELIVERED)
     assert _names({"favorites": "on"}) == ["Cowork Luna"]
     assert _names({"status": "cv_entregado"}) == ["Eventos Mar"]
     assert _names({"status": "sin_estado"}) == ["Agencia Sol", "Cowork Luna"]
@@ -134,7 +136,7 @@ def test_cargar_mas_no_se_salta_tarjetas_si_la_lista_encoge(auth_client, monkeyp
     monkeypatch.setattr("apps.companies.views.PAGE_SIZE", 2)
     companies = [_company(f"Empresa {i}", 90 - i) for i in range(5)]
     for company in companies:
-        Favorite.objects.create(company=company)
+        Favorite.objects.create(user=owner(), company=company)
 
     resp = auth_client.get(reverse("explorar") + "?favorites=on")
     assert [c.name for c in resp.context["companies"]] == ["Empresa 0", "Empresa 1"]
@@ -158,7 +160,7 @@ def test_cargar_mas_recorre_todo_sin_repetir_en_cada_orden(auth_client, monkeypa
     # Empates de encaje, de confianza y de nombre, y empresas sin puntuar.
     for i, (score, confidence) in enumerate([(80, 50), (80, 50), (None, 50), (None, 20), (60, 90)]):
         _company("Igual" if i < 2 else f"Empresa {i}", score, confidence_score=confidence)
-    expected = [c.pk for c in CompanyFilter({"sort": sort}).apply()]
+    expected = [c.pk for c in CompanyFilter({"sort": sort}, user=owner()).apply()]
 
     resp = auth_client.get(reverse("explorar") + f"?sort={sort}")
     seen = [c.pk for c in resp.context["companies"]]
@@ -232,10 +234,10 @@ def test_ficha_muestra_datos_y_acciones(auth_client, companies):
     company.address = "Carrer de Pujades 51"
     company.save()
     Enrichment.objects.filter(company=company).update(
-        summary="Agencia creativa.",
-        extracted_at=timezone.now(),
-        hook="Me encantó vuestra campaña.",
-        fit_reason="Encaja por eventos.",
+        summary="Agencia creativa.", extracted_at=timezone.now()
+    )
+    FitScore.objects.filter(company=company).update(
+        hook="Me encantó vuestra campaña.", fit_reason="Encaja por eventos."
     )
 
     resp = auth_client.get(reverse("ficha", args=[company.pk]))
@@ -278,7 +280,7 @@ def test_ficha_de_empresa_inexistente(auth_client, db):
 def test_datos_del_mapa_con_filtros(auth_client, companies):
     Company.objects.filter(pk=companies["a"].pk).update(lat=41.39, lng=2.17)
     Company.objects.filter(pk=companies["b"].pk).update(lat=41.40, lng=2.16)
-    Favorite.objects.create(company=companies["a"])
+    Favorite.objects.create(user=owner(), company=companies["a"])
 
     data = auth_client.get(reverse("mapa_datos")).json()
     assert [p["name"] for p in data["points"]] == ["Agencia Sol", "Eventos Mar"]  # Luna sin coords

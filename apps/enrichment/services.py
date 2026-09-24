@@ -17,23 +17,25 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.db import DatabaseError, connection, transaction
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from apps.companies.models import Company
+from apps.core.locks import advisory_lock
 from apps.llm.client import LLMError, LLMNotConfigured, call_structured
 from apps.llm.models import LLMCall
 from apps.llm.prompts import load_prompt
 from apps.profiles.models import Profile
 
 from .crawler import CrawlError, CrawlResult, crawl_site
-from .models import CompanyPage, Enrichment
+from .models import CompanyPage, Enrichment, FitScore
 from .profile import (
     SCORE_PROMPT,
-    current_profile,
     profile_brief,
     profile_fingerprint,
+    profile_for,
     profile_is_usable,
+    usable_profiles,
 )
 from .schemas import ExtractedCompany, ScoreBatch
 
@@ -136,8 +138,8 @@ def ensure_enrichments() -> int:
     return len(rows)
 
 
-def select_for_crawl(limit: int, profile: Profile | None = None) -> list[Enrichment]:
-    """Webs pendientes o caducadas, primero las de categorías preferidas y más confianza."""
+def select_for_crawl(limit: int, profiles: Iterable[Profile] = ()) -> list[Enrichment]:
+    """Webs pendientes o caducadas, primero las de sectores preferidos y más confianza."""
     stale = timezone.now() - REFRESH_AFTER
     qs = (
         Enrichment.objects.select_related("company", "company__category")
@@ -145,7 +147,7 @@ def select_for_crawl(limit: int, profile: Profile | None = None) -> list[Enrichm
         .exclude(company__website="")
         .filter(Q(crawled_at__isnull=True) | Q(crawled_at__lt=stale))
     )
-    preferred = list(profile.categories.values_list("pk", flat=True)) if profile else []
+    preferred = {c.pk for profile in profiles for c in profile.categories.all()}
     ordered = sorted(
         qs,
         key=lambda e: (
@@ -362,20 +364,25 @@ def company_card(enrichment: Enrichment) -> dict:
     return card
 
 
-def select_for_scoring(fingerprint: str) -> list[Enrichment]:
-    """Sin puntuar, puntuadas con otro perfil o con datos extraídos más nuevos que la nota.
+def select_for_scoring(user_id: int, fingerprint: str) -> list[Enrichment]:
+    """Sin nota de este usuario, puntuadas con otro perfil o con datos extraídos más nuevos.
 
     Las webs rastreadas pero aún sin analizar esperan a la extracción (salvo que esta
     haya fallado ya `MAX_EXTRACTION_ATTEMPTS` veces: ver `Enrichment.needs_extraction`).
     """
+    mine = FitScore.objects.filter(user_id=user_id, company=OuterRef("company"))
     qs = (
         Enrichment.objects.select_related("company", "company__category", "company__zone")
         .filter(company__is_active=True)
         .exclude(crawl_status=Enrichment.CrawlStatus.PENDING)
+        .annotate(
+            my_hash=Subquery(mine.values("profile_hash")[:1]),
+            my_scored_at=Subquery(mine.values("scored_at")[:1]),
+        )
         .filter(
-            Q(scored_at__isnull=True)
-            | ~Q(profile_hash=fingerprint)
-            | Q(extracted_at__gt=F("scored_at"))
+            Q(my_scored_at__isnull=True)
+            | ~Q(my_hash=fingerprint)
+            | Q(extracted_at__gt=F("my_scored_at"))
         )
         .order_by("-company__confidence_score", "company_id")
     )
@@ -399,39 +406,48 @@ def _score_batch(item: tuple[list[Enrichment], str, str]):
     )
 
 
-def apply_scores(enrichments: list[Enrichment], result, fingerprint: str) -> int:
+SCORE_FIELDS = [
+    "fit_score",
+    "fit_breakdown",
+    "fit_reason",
+    "hook",
+    "scored_at",
+    "profile_hash",
+    "scoring_model",
+    "scoring_prompt_version",
+]
+
+
+def apply_scores(user_id: int, enrichments: list[Enrichment], result, fingerprint: str) -> int:
+    """Guarda (o actualiza) la nota de cada empresa del lote para este usuario."""
     by_id = {e.company_id: e for e in enrichments}
     now = timezone.now()
-    updated = []
+    rows = []
     for score in result.output.scores:
-        enrichment = by_id.pop(score.company_id, None)
-        if enrichment is None:  # id inventado o repetido
+        if by_id.pop(score.company_id, None) is None:  # id inventado o repetido
             continue
-        enrichment.fit_score = score.fit_score
-        enrichment.fit_breakdown = score.breakdown
-        enrichment.fit_reason = score.reason
-        enrichment.hook = score.hook
-        enrichment.scored_at = now
-        enrichment.profile_hash = fingerprint
-        enrichment.scoring_model = result.call.model
-        enrichment.scoring_prompt_version = result.call.prompt_version
-        enrichment.error = ""
-        updated.append(enrichment)
-    Enrichment.objects.bulk_update(
-        updated,
-        [
-            "fit_score",
-            "fit_breakdown",
-            "fit_reason",
-            "hook",
-            "scored_at",
-            "profile_hash",
-            "scoring_model",
-            "scoring_prompt_version",
-            "error",
-        ],
+        rows.append(
+            FitScore(
+                user_id=user_id,
+                company_id=score.company_id,
+                fit_score=score.fit_score,
+                fit_breakdown=score.breakdown,
+                fit_reason=score.reason,
+                hook=score.hook,
+                scored_at=now,
+                profile_hash=fingerprint,
+                scoring_model=result.call.model,
+                scoring_prompt_version=result.call.prompt_version,
+            )
+        )
+    FitScore.objects.bulk_create(
+        rows,
+        update_conflicts=True,
+        unique_fields=["user", "company"],
+        update_fields=SCORE_FIELDS,
     )
-    return len(updated)
+    Enrichment.objects.filter(company_id__in=[r.company_id for r in rows]).update(error="")
+    return len(rows)
 
 
 def score(profile: Profile | None, stats: EnrichStats, deadline: Deadline, workers: int) -> None:
@@ -440,7 +456,7 @@ def score(profile: Profile | None, stats: EnrichStats, deadline: Deadline, worke
         return
     brief = profile_brief(profile)
     fingerprint = profile_fingerprint(profile)
-    pending = select_for_scoring(fingerprint)
+    pending = select_for_scoring(profile.user_id, fingerprint)
     batches = [
         (pending[i : i + SCORE_BATCH_SIZE], brief, fingerprint)
         for i in range(0, len(pending), SCORE_BATCH_SIZE)
@@ -464,7 +480,7 @@ def score(profile: Profile | None, stats: EnrichStats, deadline: Deadline, worke
                 stats.llm_errors += 1
                 logger.warning("Puntuación de un lote fallida: %s", outcome)
                 continue
-            applied = apply_scores(enrichments, outcome, fingerprint)
+            applied = apply_scores(profile.user_id, enrichments, outcome, fingerprint)
             if not applied:
                 # Ningún id del lote: si se quedara en la caché, el mismo lote recibiría la
                 # misma respuesta inútil cada noche. Se borra y cuenta como error.
@@ -492,14 +508,27 @@ def run_enrichment(
     max_minutes: float | None = 40,
     crawl_workers: int = CRAWL_WORKERS,
     llm_workers: int = LLM_WORKERS,
+    user=None,
 ) -> EnrichStats:
-    """`all`: rastrear (hasta `limit` webs) + analizar + puntuar. `score`: solo puntuar."""
+    """`all`: rastrear (hasta `limit` webs) + analizar + puntuar. `score`: solo puntuar.
+
+    Sin `user` se puntúa para todos los perfiles con datos (ejecución nocturna); con él,
+    solo para ese usuario (búsqueda personalizada). El rastreo y la extracción son
+    comunes: si otro proceso los está haciendo, este se los salta y solo puntúa.
+    """
     stats = EnrichStats()
     deadline = Deadline(max_minutes)
-    profile = current_profile()
+    profiles = [p for p in [profile_for(user)] if p] if user is not None else usable_profiles()
     ensure_enrichments()
     if mode == "all":
-        crawl(select_for_crawl(limit, profile), stats, deadline, crawl_workers)
-        extract(stats, deadline, llm_workers)
-    score(profile, stats, deadline, llm_workers)
+        with advisory_lock("enrichment-crawl", wait=False) as acquired:
+            if acquired:
+                crawl(select_for_crawl(limit, profiles), stats, deadline, crawl_workers)
+                extract(stats, deadline, llm_workers)
+            else:
+                stats.notes.append("Otro proceso está leyendo webs: esta ejecución solo puntúa.")
+    if not profiles:
+        stats.notes.append("Sin puntuar: no hay ningún perfil con datos (sube y analiza el CV).")
+    for profile in profiles:
+        score(profile, stats, deadline, llm_workers)
     return stats

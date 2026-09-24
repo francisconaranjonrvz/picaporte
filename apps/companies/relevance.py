@@ -4,7 +4,7 @@ Las fuentes devuelven todo lo que encaja con sus etiquetas; aquí se decide qué
 entra en la base de datos:
 
 - **Sectores**: los básicos (agencias, estudios, productoras...) siempre; los
-  opcionales (medios, editoriales, fotografía...) solo si el perfil los elige.
+  opcionales (medios, editoriales, fotografía...) solo si alguna cuenta los elige.
 - **Término municipal**: el recuadro de las fuentes incluye L'Hospitalet,
   Cornellà o El Prat; se comprueba contra el límite real de Barcelona (OSM).
 - **Nombres que delatan otra actividad**: imprentas, rotulistas, telecos,
@@ -112,4 +112,20 @@ def searched_sectors(profile=None) -> frozenset[str]:
     if profile is None or profile.pk is None:
         return CORE_SECTORS
     chosen = set(profile.categories.values_list("slug", flat=True))
+    return CORE_SECTORS | (chosen & OPTIONAL_SECTORS)
+
+
+def all_searched_sectors() -> frozenset[str]:
+    """Lo que busca el descubrimiento: los básicos y los opcionales de cualquier cuenta.
+
+    El catálogo es común: si una cuenta deja de querer "medios" pero otra no, esas
+    empresas se quedan.
+    """
+    from apps.profiles.models import Profile
+
+    chosen = set(
+        Profile.objects.filter(categories__slug__in=OPTIONAL_SECTORS).values_list(
+            "categories__slug", flat=True
+        )
+    )
     return CORE_SECTORS | (chosen & OPTIONAL_SECTORS)

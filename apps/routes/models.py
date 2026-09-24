@@ -2,6 +2,7 @@
 
 from datetime import time
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -22,6 +23,9 @@ class Route(models.Model):
         Slot.DAY: (time(9, 30), time(19, 0)),
     }
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="routes", on_delete=models.CASCADE
+    )
     date = models.DateField("día")
     slot = models.CharField("franja", max_length=8, choices=Slot.choices, default=Slot.MORNING)
     zone = models.ForeignKey(

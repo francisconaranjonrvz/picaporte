@@ -9,7 +9,7 @@ from django.urls import reverse
 
 from apps.companies.models import Company
 from apps.enrichment import services
-from apps.enrichment.models import Enrichment
+from apps.enrichment.models import Enrichment, FitScore
 from apps.jobs.models import JobRun
 from apps.profiles.models import Profile
 
@@ -76,21 +76,24 @@ def test_datos_muestra_el_analisis_y_explorar_ordena_por_encaje(auth_client, use
 
     buzz = Company.objects.create(name="Buzz", website="https://buzz.es")
     cowork = Company.objects.create(name="Cowork")
-    Enrichment.objects.create(
+    Enrichment.objects.create(company=buzz, crawl_status="ok")
+    FitScore.objects.create(
+        user=user,
         company=buzz,
-        crawl_status="ok",
         fit_score=82,
         fit_reason="Hace eventos de marca.",
         hook="Vi vuestra campaña para Wallbox.",
         profile_hash="viejo",
-        scored_at="2026-09-20T10:00:00Z",
     )
     Enrichment.objects.create(company=cowork, crawl_status="no_website")
 
     resp = auth_client.get(reverse("datos"))
     assert "Encaje con tu perfil" in resp.text
     assert "sube y analiza el CV" in resp.text  # sin perfil no se puntúa
-    assert 'hx-post="/jobs/enrich/run"' in resp.text
+    assert 'hx-post="/jobs/enrich/run"' not in resp.text  # trabajo global: solo staff
+    user.is_staff = True
+    user.save()
+    assert 'hx-post="/jobs/enrich/run"' in auth_client.get(reverse("datos")).text
 
     resp = auth_client.get(reverse("explorar"))
     html = resp.text
@@ -108,13 +111,9 @@ def test_perfil_avisa_si_el_encaje_esta_desactualizado(auth_client, user):
     resp = auth_client.get(reverse("perfil"))
     assert "se puntuó con tu perfil anterior" not in resp.text
 
-    Enrichment.objects.create(
-        company=Company.objects.create(name="Buzz"),
-        crawl_status="no_website",
-        fit_score=50,
-        profile_hash="de-otro-perfil",
-        scored_at="2026-09-20T10:00:00Z",
-    )
+    buzz = Company.objects.create(name="Buzz")
+    Enrichment.objects.create(company=buzz, crawl_status="no_website")
+    FitScore.objects.create(user=user, company=buzz, fit_score=50, profile_hash="de-otro-perfil")
     resp = auth_client.get(reverse("perfil"))
     assert "1 empresa se puntuó con tu perfil anterior" in resp.text
     assert "Buscar y puntuar ahora" in resp.text

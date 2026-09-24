@@ -17,10 +17,13 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import pairwise
 
+from django.db.models import Q
+
 from apps.catalog.models import Zone
 from apps.companies.dedupe import distance_m
 from apps.companies.models import Company
 from apps.companies.opening import opening_for
+from apps.companies.personal import for_user
 from apps.tracking.models import Favorite, Visit
 
 BARCELONA_CENTER = (41.3874, 2.1686)  # plaça de Catalunya
@@ -58,13 +61,12 @@ def zone_center(zone: Zone | None) -> tuple[float, float]:
 
 def priority_for(company: Company, day: date) -> float:
     score = 0.0
-    favorite = getattr(company, "favorite", None)
+    favorite = company.favorite
     if favorite is not None:
         score += FAVORITE_BONUS.get(favorite.priority, 20)
-    enrichment = getattr(company, "enrichment", None)
-    fit = enrichment.fit_score if enrichment and enrichment.fit_score is not None else UNSCORED_FIT
+    fit = company.score.fit_score if company.score is not None else UNSCORED_FIT
     score += 0.6 * fit
-    visit = getattr(company, "visit", None)
+    visit = company.visit
     if visit is not None:
         score += STATUS_BONUS.get(visit.status, 0)
         if visit.next_action_on == day:
@@ -72,13 +74,14 @@ def priority_for(company: Company, day: date) -> float:
     return score + company.confidence_score / 20
 
 
-def candidates(day: date, slot_times, zone: Zone | None) -> list[Candidate]:
+def candidates(user, day: date, slot_times, zone: Zone | None) -> list[Candidate]:
     start, end = slot_times
-    qs = (
-        Company.objects.filter(is_active=True, lat__isnull=False, lng__isnull=False)
-        .select_related("enrichment", "visit", "favorite", "category")
-        .exclude(visit__status__in=DONE_STATUSES)
-    )
+    qs = for_user(
+        Company.objects.filter(is_active=True, lat__isnull=False, lng__isnull=False).select_related(
+            "category"
+        ),
+        user,
+    ).filter(Q(visit_status__isnull=True) | ~Q(visit_status__in=DONE_STATUSES))
     if zone is not None:
         qs = qs.filter(zone=zone)
     weekday = day.weekday()
@@ -118,6 +121,7 @@ def order_by_proximity(stops: list[Candidate], start: tuple[float, float]) -> li
 
 
 def plan(
+    user,
     day: date,
     slot_times,
     zone: Zone | None,
@@ -132,7 +136,7 @@ def plan(
         return c.priority - DISTANCE_PENALTY_PER_KM * distance_m(*origin, *c.point) / 1000
 
     pool = sorted(
-        candidates(day, slot_times, zone),
+        candidates(user, day, slot_times, zone),
         key=lambda c: (-adjusted(c), c.company.name),
     )[:size]
     return order_by_proximity(pool, origin), origin

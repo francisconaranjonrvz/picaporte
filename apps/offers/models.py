@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -17,10 +18,13 @@ class JobOffer(models.Model):
         FUZZY = "fuzzy", "Nombre parecido"
         NONE = "", "Sin empresa"
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="job_offers", on_delete=models.CASCADE
+    )
     title = models.CharField("puesto", max_length=300)
     company_name = models.CharField("empresa (según el portal)", max_length=200)
     portal = models.CharField(max_length=120, blank=True)
-    url = models.URLField(max_length=600, unique=True)
+    url = models.URLField(max_length=600)
     location = models.CharField("ubicación", max_length=200, blank=True)
     published_on = models.DateField("fecha", null=True, blank=True)
     score = models.FloatField("puntuación", null=True, blank=True)
@@ -34,6 +38,7 @@ class JobOffer(models.Model):
 
     class Meta:
         ordering = ["-published_on", "-id"]
+        constraints = [models.UniqueConstraint(fields=["user", "url"], name="unique_user_offer")]
         verbose_name = "oferta"
         verbose_name_plural = "ofertas"
 
@@ -46,10 +51,10 @@ class JobOffer(models.Model):
         return seen >= timezone.localdate() - ACTIVE_FOR
 
 
-def active_offers():
-    """Ofertas vistas en los últimos 45 días (o sin fecha, importadas en ese plazo)."""
+def active_offers(user):
+    """Ofertas del usuario vistas en los últimos 45 días (o sin fecha, importadas en ese plazo)."""
     since = timezone.localdate() - ACTIVE_FOR
-    return JobOffer.objects.filter(
+    return JobOffer.objects.filter(user=user).filter(
         models.Q(published_on__gte=since)
         | models.Q(published_on__isnull=True, imported_at__date__gte=since)
     )

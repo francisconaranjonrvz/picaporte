@@ -2,7 +2,7 @@
 
 > Empresas de Barcelona donde llamar a la puerta con tu CV en la mano.
 
-Picaporte es una app web personal (un solo usuario) para una recién graduada en Publicidad y
+Picaporte es una app web (con registro abierto: cada cuenta tiene su propia búsqueda) pensada para una recién graduada en Publicidad y
 RRPP: descubre empresas del sector en Barcelona —tengan o no ofertas publicadas—, las prioriza
 según su perfil, guarda favoritas, planifica rutas de visita y hace seguimiento de cada entrega.
 Está pensada para usarse desde el móvil, caminando por la ciudad, y se instala como PWA.
@@ -20,6 +20,7 @@ hosting **0 €**.
 | ✅ Hecha | **6 · Ruta**: día, zona y franja → 6-10 empresas abiertas priorizando favoritas y encaje, ordenadas a pie (vecino más cercano + 2-opt), enlace de Google Maps (y por tramos para el navegador móvil) y modo ruta para marcar paradas (ADR 0012) |
 | ✅ Hecha | **7 · Ofertas**: importación del `scan-history.tsv` de career-ops (o CSV/JSON), cruce con las empresas por dominio, nombre o parecido estricto, filtro e insignia "ofertas activas" en Explorar y lista en la ficha (ADR 0013) |
 | ✅ Hecha | **Búsqueda personalizada**: la IA propone sectores desde el CV, guardar el perfil lanza la búsqueda y la puntuación, ranking por criterios con veredicto, limpieza de fuentes (término municipal, imprentas, coworkings, falsos positivos) y rutas de hasta 20 paradas editables (ADR 0014) |
+| ✅ Hecha | **Multiusuario**: registro abierto (`/registro/`, tope `MAX_USERS`); catálogo de empresas común y perfil, ranking, favoritas, visitas, notas, rutas y ofertas de cada cuenta; cupos diarios de IA y de búsquedas (ADR 0015) |
 
 ## Arquitectura
 
@@ -80,6 +81,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0015](docs/adr/0015-multiusuario-con-registro-abierto.md) | **Multiusuario con registro abierto**: catálogo y lectura de webs comunes; `FitScore`, favoritas, visitas, notas, rutas y ofertas por usuario; trabajos globales solo para staff; candados de Postgres entre workers; topes de cuentas, búsquedas y análisis de CV |
 | [0014](docs/adr/0014-busqueda-personalizada-y-limpieza.md) | **Búsqueda personalizada**: sectores básicos + opcionales del perfil, `personalize.yml` al guardar, filtro de relevancia central (polígono del término municipal, nombres que delatan otra actividad), ranking por 5 criterios sumados por la app y veredicto por bandas |
 | [0013](docs/adr/0013-ofertas-de-career-ops.md) | **Ofertas de career-ops**: importador con detección de formato (TSV de career-ops, CSV, JSON), upsert por URL, cruce dominio → nombre → difuso estricto ignorando portales y ATS, activas = últimos 45 días |
 | [0012](docs/adr/0012-rutas-a-pie.md) | **Rutas a pie** sin APIs de pago: planificador propio (prioridad + vecino más cercano + 2-opt), hasta 20 paradas editables, enlaces `dir/?api=1` con ≤ 9 paradas y tramos de 3 para navegadores móviles; proponer no cambia estados, marcar sí y deshacer restaura |
@@ -93,7 +95,7 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 ```
 config/            settings/{base,local,production,test}.py · urls · wsgi · logs
 apps/core/         health, pestañas, styleguide, PWA, design.py (tokens + contraste), templatetags/ui.py
-apps/accounts/     login/logout, management/commands/ensure_user.py
+apps/accounts/     login/logout, registro abierto (/registro/), management/commands/ensure_user.py
 apps/catalog/      Category y Zone configurables en BD (sembradas por migración)
 apps/llm/          capa común (caché por hash, LLMCall con tokens y coste) + providers/ (nvidia gratuito, anthropic opcional)
 apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y parseo, formulario móvil
@@ -158,7 +160,7 @@ Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con r
 
 - En **Explorar → Ofertas** se sube `data/scan-history.tsv` de career-ops (o un CSV/JSON con
   título, empresa y url). Solo entran las filas `added`; reimportar actualiza sin duplicar.
-  También: `uv run python manage.py import_offers ruta/al/scan-history.tsv`.
+  También: `uv run python manage.py import_offers ruta/al/scan-history.tsv --user laura`.
 - Cada oferta se cruza con las empresas: dominio de la URL (salvo portales y ATS), nombre exacto
   normalizado o parecido estricto. Las activas (últimos 45 días) dan la insignia **Ofertas
   activas**, el filtro "Con ofertas" de Explorar y una lista en la ficha.
@@ -322,6 +324,7 @@ docker compose --profile css up css                        # Tailwind en modo wa
 | `NVIDIA_API_KEY` (+ `LLM_PROVIDER`, `LLM_MODEL`, `LLM_MODEL_FAST`, `LLM_TIMEOUT` opcionales) | opcional | ✅ | ✅ (enriquecimiento) |
 | `ANTHROPIC_API_KEY` (solo con `LLM_PROVIDER=anthropic`) | opcional | opcional | opcional |
 | `GITHUB_DISPATCH_TOKEN` (+ `GITHUB_REPO`, `GITHUB_WORKFLOW_REF` opcionales) | opcional | ✅ | — |
+| `MAX_USERS` (tope de cuentas; 0 = registro cerrado; por defecto 50) | opcional | opcional | — |
 | `HF_TOKEN` (lectura, con acceso a `foursquare/fsq-os-places`) | opcional | — | ✅ |
 
 ### CI
@@ -366,6 +369,8 @@ llamada); recalcular el `fit_score` al cambiar el perfil no repite ningún fetch
 - El filtro de basura se basa en palabras del nombre: puede dejar fuera alguna empresa válida o
   dejar pasar alguna que no lo es (esas puntúan bajo). Desmarcar un sector opcional retira sus
   empresas en la siguiente búsqueda.
+- Registro abierto sin verificación de email ni recuperación de contraseña: los topes
+  (`MAX_USERS`, 5 búsquedas y 10 análisis de CV al día por cuenta) acotan el gasto de cuota.
 - Los *preview deployments* de Vercel comparten la base de datos de producción y están
   protegidos por Vercel Authentication.
 

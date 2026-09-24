@@ -8,10 +8,11 @@ from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from apps.catalog.models import Category, Zone
+from apps.core.locks import advisory_lock
 
 from .dedupe import MemoryIndex, confidence_score, find_match, merge_into
 from .models import Company, Source, SourceRecord
-from .relevance import exclusion_reason, searched_sectors
+from .relevance import all_searched_sectors, exclusion_reason
 from .sources import RawCompany, SourceError, get_adapters
 
 logger = logging.getLogger(__name__)
@@ -246,14 +247,18 @@ def run_discovery(
     """Ejecuta cada fuente y vuelca sus resultados. Un fallo en una fuente no detiene las demás.
 
     Solo entra lo relevante (`relevance.exclusion_reason`) de los sectores buscados, que por
-    defecto salen del perfil: lo descartado no se ve, así que `retire_unseen` lo retira.
+    defecto son los básicos y los opcionales de todas las cuentas: lo descartado no se ve,
+    así que `retire_unseen` lo retira. Dos descubrimientos nunca corren a la vez (el índice
+    en memoria no lo toleraría): el segundo espera al candado.
     """
-    profile = None
-    if sectors is None:
-        from apps.enrichment.profile import current_profile
+    with advisory_lock("discovery"):
+        return _run_discovery(source_names, dry_run=dry_run, sectors=sectors)
 
-        profile = current_profile()
-        sectors = searched_sectors(profile)
+
+def _run_discovery(source_names, *, dry_run, sectors):
+    from_profiles = sectors is None
+    if from_profiles:
+        sectors = all_searched_sectors()
     categories = {c.slug: c for c in Category.objects.all()}
     zones = list(Zone.objects.filter(is_active=True))
     ingestor = None if dry_run else Ingestor(categories=categories, zones=zones)
@@ -293,9 +298,11 @@ def run_discovery(
         # (una fuente caída o vacía no debe vaciar la base de datos).
         if not stats.error and stats.fetched:
             stats.retired = ingestor.retire_unseen(adapter.name)
-    if profile is not None and ingestor is not None:
-        # Perfil ya atendido: guardarlo sin cambiar sectores no lanza otra búsqueda.
-        type(profile).objects.filter(pk=profile.pk).update(discovered_sectors=sorted(sectors))
+    if from_profiles and ingestor is not None:
+        # Perfiles ya atendidos: guardarlos sin sectores nuevos no lanza otra búsqueda.
+        from apps.profiles.models import Profile
+
+        Profile.objects.update(discovered_sectors=sorted(sectors))
     return results
 
 

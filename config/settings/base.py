@@ -135,3 +135,7 @@ LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=90)  # el nivel gratuito de NVIDIA 
 GITHUB_DISPATCH_TOKEN = env("GITHUB_DISPATCH_TOKEN", default="")
 GITHUB_REPO = env("GITHUB_REPO", default="francisconaranjonrvz/picaporte")
 GITHUB_WORKFLOW_REF = env("GITHUB_WORKFLOW_REF", default="main")  # rama con los workflows
+
+# Registro abierto (ADR 0015). Tope de cuentas: cada una gasta cuota gratuita de IA y
+# minutos de Actions al puntuar su perfil. 0 = registro cerrado.
+MAX_USERS = env.int("MAX_USERS", default=50)

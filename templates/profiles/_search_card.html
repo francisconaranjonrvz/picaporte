@@ -19,7 +19,7 @@
   {% if ranking %}
     <h3 class="mt-5 text-sm font-bold">Las que más encajan contigo</h3>
     <ol class="mt-2 divide-y divide-primary/40">
-      {% for company in ranking %}
+      {% for score in ranking %}{% with company=score.company %}
         <li>
           <a href="{% url 'ficha' company.pk %}" class="flex items-center gap-3 py-2">
             <span class="w-5 text-right text-sm font-bold text-muted">{{ forloop.counter }}</span>
@@ -27,10 +27,10 @@
               <span class="block truncate font-semibold">{{ company.name }}</span>
               <span class="block truncate text-xs text-muted">{{ company.category.name|default:"Sin categoría" }}</span>
             </span>
-            {% include "enrichment/_score_badge.html" with e=company.enrichment %}
+            {% include "enrichment/_score_badge.html" with e=score %}
           </a>
         </li>
-      {% endfor %}
+      {% endwith %}{% endfor %}
     </ol>
     {% url "explorar" as explorar_url %}
     {% btn href=explorar_url variant="ghost" size="md" cls="mt-2 w-full" %}Ver el ranking completo{% endbtn %}

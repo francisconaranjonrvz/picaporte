@@ -9,7 +9,7 @@ from apps.catalog.models import Category
 from apps.companies.models import Company
 from apps.enrichment import services
 from apps.enrichment.crawler import CrawlError, CrawlResult, Page
-from apps.enrichment.models import MAX_EXTRACTION_ATTEMPTS, CompanyPage, Enrichment
+from apps.enrichment.models import MAX_EXTRACTION_ATTEMPTS, CompanyPage, Enrichment, FitScore
 from apps.enrichment.profile import profile_fingerprint, stale_scores_count
 from apps.enrichment.ranking import DIMENSIONS
 from apps.enrichment.schemas import CompanyScore, ExtractedCompany, ScoreBatch
@@ -93,10 +93,10 @@ def test_seleccion_para_rastrear_prioriza_preferidas_y_confianza(profile):
         crawled_at=timezone.now() - timedelta(days=45)  # caducada: se vuelve a leer
     )
 
-    selected = services.select_for_crawl(10, profile)
+    selected = services.select_for_crawl(10, [profile])
 
     assert [e.company.name for e in selected] == ["Eventos", "Agencia"]
-    assert [e.company.name for e in services.select_for_crawl(1, profile)] == ["Eventos"]
+    assert [e.company.name for e in services.select_for_crawl(1, [profile])] == ["Eventos"]
 
 
 def test_guardar_rastreo_ok_y_fallido(db):
@@ -261,7 +261,7 @@ def test_puntuacion_por_lotes_e_ids_desconocidos(profile, monkeypatch):
     assert "<perfil>" in prompts[0]
     assert "Meta Ads" in prompts[0]
     assert f'"company_id": {a.pk}' in prompts[0]
-    ea, eb = Enrichment.objects.get(company=a), Enrichment.objects.get(company=b)
+    ea = FitScore.objects.get(user=profile.user, company=a)
     assert (ea.fit_score, ea.hook, ea.profile_hash) == (
         80,
         "Hola, soy Laura.",
@@ -274,7 +274,7 @@ def test_puntuacion_por_lotes_e_ids_desconocidos(profile, monkeypatch):
         "languages": 0,
         "clarity": 0,
     }
-    assert eb.fit_score is None  # se reintentará en la próxima ejecución
+    assert not FitScore.objects.filter(company=b).exists()  # se reintentará la próxima vez
 
 
 def test_sin_perfil_no_se_puntua(db, monkeypatch):
@@ -316,12 +316,12 @@ def test_cambiar_el_perfil_solo_repite_la_puntuacion(profile, monkeypatch):
     )
     stats = services.run_enrichment(mode="score", max_minutes=None, llm_workers=1)
     assert (stats.crawled, stats.extracted, stats.scored) == (0, 0, 1)
-    assert Enrichment.objects.get(company=company).fit_score == 90
+    assert FitScore.objects.get(company=company).fit_score == 90
     assert stale_scores_count(profile) == 0
 
 
 def test_las_webs_sin_analizar_esperan_a_la_extraccion(profile, crawled):
-    assert services.select_for_scoring(profile_fingerprint(profile)) == []
+    assert services.select_for_scoring(profile.user_id, profile_fingerprint(profile)) == []
 
 
 def test_plazo_agotado_no_empieza_trabajo_nuevo(profile, monkeypatch):
@@ -432,7 +432,7 @@ def test_una_extraccion_que_falla_siempre_se_abandona_y_se_puntua(profile, monke
     assert len(calls) == MAX_EXTRACTION_ATTEMPTS
     e = Enrichment.objects.get(company=company)
     assert not e.needs_extraction
-    assert services.select_for_scoring(profile_fingerprint(profile)) == [e]
+    assert services.select_for_scoring(profile.user_id, profile_fingerprint(profile)) == [e]
 
     # Un nuevo rastreo le da otra oportunidad.
     services.save_crawl(e, _crawl_result())
@@ -461,4 +461,4 @@ def test_lote_de_puntuacion_sin_ids_validos_no_queda_en_cache(profile, monkeypat
 
     assert (stats.scored, stats.llm_errors) == (0, 1)
     assert not LLMCall.objects.filter(pk=call.pk).exists()  # la próxima noche se vuelve a pedir
-    assert Enrichment.objects.get(company=company).fit_score is None
+    assert not FitScore.objects.filter(company=company).exists()

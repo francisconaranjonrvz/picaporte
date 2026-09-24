@@ -1,5 +1,6 @@
 import json
 
+from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
@@ -10,8 +11,16 @@ from .services import refresh_from_github, start_from_app
 ENRICH_MODES = {"all", "score"}
 
 
-def latest(kind: str) -> JobRun | None:
-    return JobRun.objects.filter(kind=kind).first()
+# Descubrir y enriquecer son trabajos de todo el catálogo: solo desde una cuenta de staff.
+GLOBAL_KINDS = {JobRun.Kind.DISCOVER, JobRun.Kind.ENRICH}
+
+
+def latest(kind: str, user=None) -> JobRun | None:
+    """Último trabajo de ese tipo; la búsqueda personalizada, la del usuario."""
+    jobs = JobRun.objects.filter(kind=kind)
+    if kind == JobRun.Kind.PERSONALIZE:
+        jobs = jobs.filter(user=user)
+    return jobs.first()
 
 
 def _kind(kind: str) -> str:
@@ -24,13 +33,16 @@ def _kind(kind: str) -> str:
 def trigger(request, kind):
     """Botones "Buscar nuevas empresas" / "Analizar webs": lanza el workflow (parcial HTMX)."""
     kind = _kind(kind)
+    if kind in GLOBAL_KINDS and not request.user.is_staff:
+        raise PermissionDenied("Solo una cuenta de administración lanza trabajos globales.")
     inputs = {}
     if kind == JobRun.Kind.ENRICH:
         mode = request.POST.get("mode", "all")
         inputs["mode"] = mode if mode in ENRICH_MODES else "all"
     elif kind == JobRun.Kind.PERSONALIZE:
         inputs["discover"] = "0" if request.POST.get("discover") == "0" else "1"
-    job = start_from_app(kind, inputs)
+    user = request.user if kind == JobRun.Kind.PERSONALIZE else None
+    job = start_from_app(kind, inputs, user=user)
     # Si otro trabajo lo bloquea, se muestra (y se sondea) ese en lugar del pedido.
     return render(request, "jobs/_status.html", {"job": job, "kind": job.kind})
 
@@ -44,7 +56,7 @@ def status(request, kind):
     páginas cuyas cifras cambian (Datos) se recargan; Perfil no, para no perder lo escrito.
     """
     kind = _kind(kind)
-    job = latest(kind)
+    job = latest(kind, request.user)
     if job is not None:
         job = refresh_from_github(job)
     response = render(request, "jobs/_status.html", {"job": job, "kind": kind})

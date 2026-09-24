@@ -58,7 +58,7 @@
             <span class="block truncate font-semibold">{{ stop.company.name }}</span>
             <span class="block truncate text-xs text-muted">{{ stop.company.category.name|default:"" }}{% if stop.walk_min %} · {{ stop.walk_min }} min{% endif %}{% if stop.is_done %} · {{ stop.get_state_display }}{% endif %}</span>
           </a>
-          {% include "enrichment/_score_badge.html" with e=stop.company.enrichment compact=True %}
+          {% include "enrichment/_score_badge.html" with e=stop.company.score compact=True %}
           {% if not stop.is_done %}
           <form method="post" action="{% url 'parada_quitar' stop.pk %}">
             {% csrf_token %}

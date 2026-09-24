@@ -6,17 +6,19 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from apps.enrichment.models import Enrichment
-from apps.enrichment.profile import current_profile, profile_is_usable, stale_scores_count
+from apps.enrichment.models import Enrichment, FitScore
+from apps.enrichment.profile import profile_for, profile_is_usable, stale_scores_count
 from apps.jobs.models import JobRun
 from apps.jobs.views import latest
 from apps.offers.models import active_offers
+from apps.tracking import services as tracking
 from apps.tracking.forms import VisitForm
 from apps.tracking.models import Visit
 
 from .filters import CompanyFilter, base_queryset
 from .models import Company, Source, SourceRecord
 from .opening import opening_for
+from .personal import attach, for_user
 
 PAGE_SIZE = 20
 MAP_LIMIT = 1500  # marcadores como máximo (Leaflet en canvas dibuja miles sin problema)
@@ -45,17 +47,15 @@ def explorar(request):
     cambia entre tanda y tanda (favoritas quitadas, "Abierto ahora" a una hora en punto),
     no se saltan ni se repiten tarjetas.
     """
-    form = CompanyFilter(request.GET or None)
+    form = CompanyFilter(request.GET or None, user=request.user)
     query = request.GET.copy()
     query.pop("after", None)
     context = {"title": "Explorar", "form": form, "query": query.urlencode()}
     if request.htmx and "after" in request.GET:
         try:
-            anchor = (
-                Company.objects.select_related("enrichment")
-                .filter(pk=int(request.GET["after"]))
-                .first()
-            )
+            anchor = for_user(
+                Company.objects.filter(pk=int(request.GET["after"])), request.user
+            ).first()
         except (ValueError, OverflowError):
             anchor = None
         if anchor is None:
@@ -84,7 +84,7 @@ def datos(request):
         .order_by("-total", "category__name")
     )
     enrichments = Enrichment.objects.filter(company__is_active=True)
-    profile = current_profile()
+    profile = profile_for(request.user)
     context = {
         "title": "Datos",
         "total": companies.count(),
@@ -104,7 +104,7 @@ def datos(request):
         "enrichment": {
             "crawled": enrichments.filter(crawl_status=Enrichment.CrawlStatus.OK).count(),
             "extracted": enrichments.filter(extracted_at__isnull=False).count(),
-            "scored": enrichments.filter(fit_score__isnull=False).count(),
+            "scored": FitScore.objects.filter(user=request.user, company__is_active=True).count(),
             "stale": stale_scores_count(profile),
             "profile_ready": profile_is_usable(profile),
         },
@@ -114,57 +114,58 @@ def datos(request):
 
 @require_GET
 def ficha(request, pk):
-    company = get_object_or_404(
-        Company.objects.select_related("category", "zone", "enrichment", "visit", "favorite"), pk=pk
+    company = attach(
+        get_object_or_404(Company.objects.select_related("category", "zone", "enrichment"), pk=pk),
+        request.user,
     )
     now = timezone.localtime()
     opening = opening_for(company.opening_hours)
     enrichment = getattr(company, "enrichment", None)
     context = {
-        "in_route": company.pk in _route_company_ids(),
+        "in_route": company.pk in _route_company_ids(request.user),
         "title": company.name,
         "company": company,
         "enrichment": enrichment,
-        "visit": getattr(company, "visit", None),
-        "favorite": getattr(company, "favorite", None),
+        "score": company.score,
+        "visit": company.visit,
+        "favorite": company.favorite,
         "opening": opening,
         "open_now": opening.is_open(now),
         "today_label": opening.today_label(now),
-        "notes": company.notes.all()[:50],
-        "offers": active_offers().filter(company=company)[:10],
+        "notes": tracking.notes_for(request.user, company),
+        "offers": active_offers(request.user).filter(company=company)[:10],
         "sources": [Source(s).label for s in dict.fromkeys(company.source_names)],
         "statuses": Visit.Status.choices,
-        "form": VisitForm(instance=getattr(company, "visit", None)),
+        "form": VisitForm(instance=company.visit),
     }
     return render(request, "companies/ficha.html", context)
 
 
 @require_GET
 def mapa(request):
-    form = CompanyFilter(request.GET or None)
+    form = CompanyFilter(request.GET or None, user=request.user)
     return render(request, "companies/mapa.html", {"title": "Mapa", "form": form})
 
 
 @require_GET
 def mapa_datos(request):
     """Puntos del mapa con los mismos filtros que Explorar (JSON compacto)."""
-    form = CompanyFilter(request.GET or None)
-    results = form.apply(base_queryset().filter(lat__isnull=False, lng__isnull=False))
+    form = CompanyFilter(request.GET or None, user=request.user)
+    results = form.apply(base_queryset(request.user).filter(lat__isnull=False, lng__isnull=False))
     points = []
-    in_route = _route_company_ids()
+    in_route = _route_company_ids(request.user)
     for company in list(results)[:MAP_LIMIT]:
-        enrichment = getattr(company, "enrichment", None)
-        visit = getattr(company, "visit", None)
+        visit = company.visit
         points.append(
             {
                 "id": company.pk,
                 "name": company.name,
                 "lat": round(company.lat, 6),
                 "lng": round(company.lng, 6),
-                "score": enrichment.fit_score if enrichment else None,
+                "score": company.fit,
                 "category": company.category.name if company.category else "",
                 "status": visit.get_status_display() if visit else "",
-                "favorite": hasattr(company, "favorite"),
+                "favorite": company.is_favorite,
                 "in_route": company.pk in in_route,
                 "url": company_url(company),
             }
@@ -172,11 +173,11 @@ def mapa_datos(request):
     return JsonResponse({"points": points, "truncated": len(points) == MAP_LIMIT})
 
 
-def _route_company_ids() -> set[int]:
-    """Empresas de la ruta en curso (para el botón "Añadir a la ruta")."""
+def _route_company_ids(user) -> set[int]:
+    """Empresas de la ruta en curso del usuario (para el botón "Añadir a la ruta")."""
     from apps.routes.services import current_route  # routes depende de companies
 
-    route = current_route()
+    route = current_route(user)
     return set(route.stops.values_list("company_id", flat=True)) if route else set()
 
 

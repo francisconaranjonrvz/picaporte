@@ -10,8 +10,9 @@ from apps.catalog.models import Category
 from apps.companies import services as company_services
 from apps.companies.models import Company
 from apps.companies.relevance import CORE_SECTORS
+from apps.core.testing import owner
 from apps.enrichment import services as enrichment_services
-from apps.enrichment.models import Enrichment
+from apps.enrichment.models import Enrichment, FitScore
 from apps.jobs import github
 from apps.jobs import services as job_services
 from apps.jobs.models import JobRun
@@ -59,8 +60,10 @@ def test_primer_guardado_busca_y_puntua(auth_client, dispatched):
 
     assert "Buscando empresas de tus sectores" in resp.text
     job = JobRun.objects.get()
-    assert job.kind == JobRun.Kind.PERSONALIZE
-    assert dispatched == [("personalize.yml", {"job_id": str(job.pk), "discover": "1"})]
+    assert (job.kind, job.user) == (JobRun.Kind.PERSONALIZE, owner())
+    assert dispatched == [
+        ("personalize.yml", {"job_id": str(job.pk), "discover": "1", "user_id": str(owner().pk)})
+    ]
 
 
 def test_sin_cambios_no_relanza_y_con_cambios_decide_que_rehacer(auth_client, user, dispatched):
@@ -98,12 +101,14 @@ def test_sin_token_avisa_sin_perder_el_perfil(auth_client, settings):
 
 
 def test_no_se_lanza_un_enriquecimiento_durante_la_busqueda_personalizada(
-    auth_client, dispatched, monkeypatch
+    auth_client, user, dispatched, monkeypatch
 ):
+    user.is_staff = True
+    user.save()
     monkeypatch.setattr(
         job_services.github, "run_state", lambda run_id: github.RunState("in_progress", None, "")
     )
-    job = job_services.start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "1"})
+    job = job_services.start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "1"}, user=user)
 
     resp = auth_client.post(reverse("job_trigger", args=["enrich"]), {"mode": "all"})
 
@@ -116,9 +121,9 @@ def test_perfil_muestra_sectores_estado_y_ranking(auth_client, user):
     profile = Profile.objects.create(user=user, full_name="Laura")
     profile.categories.set(Category.objects.filter(slug="medios"))
     for name, score in (("Zeta Baja", 20), ("Alfa Top", 88), ("Beta Media", 55)):
-        Enrichment.objects.create(
-            company=Company.objects.create(name=name), crawl_status="no_website", fit_score=score
-        )
+        company = Company.objects.create(name=name)
+        Enrichment.objects.create(company=company, crawl_status="no_website")
+        FitScore.objects.create(user=user, company=company, fit_score=score)
 
     text = auth_client.get(reverse("perfil")).text
 
@@ -148,15 +153,16 @@ def test_comando_personalize_encadena_busqueda_y_enriquecimiento(monkeypatch, us
     )
     job = JobRun.objects.create(kind=JobRun.Kind.PERSONALIZE, trigger=JobRun.Trigger.APP)
 
-    call_command("personalize", "--job-id", str(job.pk))
+    call_command("personalize", "--job-id", str(job.pk), "--user-id", str(user.pk))
 
     job.refresh_from_db()
     assert job.status == JobRun.Status.SUCCESS
     assert "osm: 3 encontradas, 2 nuevas" in job.summary
-    assert seen["enrich"]["mode"] == "all"
+    assert (seen["enrich"]["mode"], seen["enrich"]["user"]) == ("all", user)
+    assert job.user == user
     assert set(job.stats) == {"discover", "enrich"}
 
-    call_command("personalize", "--skip-discover")
+    call_command("personalize", "--skip-discover", "--user-id", str(user.pk))
     assert JobRun.objects.filter(kind=JobRun.Kind.PERSONALIZE).count() == 2
     assert "discover" not in JobRun.objects.order_by("-pk").first().stats
 
@@ -171,3 +177,37 @@ def test_la_busqueda_recuerda_los_sectores_del_perfil(monkeypatch, user):
 
     profile.refresh_from_db()
     assert profile.discovered_sectors == sorted(CORE_SECTORS | {"fotografia"})
+
+
+def test_cupo_diario_de_busquedas_personalizadas(auth_client, user, dispatched):
+    for _ in range(job_services.PERSONAL_PER_DAY):
+        job_services.start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "0"}, user=user)
+        _finish_jobs()
+    job = job_services.start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "0"}, user=user)
+    assert job.status == JobRun.Status.FAILED
+    assert "Límite diario" in job.error
+    assert len(dispatched) == job_services.PERSONAL_PER_DAY
+
+
+def test_la_busqueda_de_otra_cuenta_no_bloquea_la_mia(user, other_user, dispatched, monkeypatch):
+    monkeypatch.setattr(
+        job_services.github, "run_state", lambda run_id: github.RunState("in_progress", None, "")
+    )
+    mine = job_services.start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "1"}, user=user)
+    theirs = job_services.start_from_app(
+        JobRun.Kind.PERSONALIZE, {"discover": "1"}, user=other_user
+    )
+    assert mine.pk != theirs.pk
+    assert [inputs["user_id"] for _, inputs in dispatched] == [str(user.pk), str(other_user.pk)]
+
+
+@pytest.mark.django_db
+def test_se_buscan_los_sectores_de_todas_las_cuentas(monkeypatch, user, other_user):
+    Profile.objects.create(user=user).categories.set(Category.objects.filter(slug="medios"))
+    Profile.objects.create(user=other_user).categories.set(Category.objects.filter(slug="cultura"))
+    monkeypatch.setattr(company_services, "get_adapters", lambda names: [])
+
+    company_services.run_discovery()
+
+    expected = sorted(CORE_SECTORS | {"medios", "cultura"})
+    assert list(Profile.objects.values_list("discovered_sectors", flat=True)) == [expected] * 2

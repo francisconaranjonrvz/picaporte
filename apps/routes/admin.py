@@ -11,6 +11,6 @@ class RouteStopInline(admin.TabularInline):
 
 @admin.register(Route)
 class RouteAdmin(admin.ModelAdmin):
-    list_display = ("date", "slot", "zone", "created_at")
-    list_filter = ("slot", "zone")
+    list_display = ("date", "user", "slot", "zone", "created_at")
+    list_filter = ("user", "slot", "zone")
     inlines = [RouteStopInline]

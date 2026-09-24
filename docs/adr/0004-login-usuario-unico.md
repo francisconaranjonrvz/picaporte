@@ -1,6 +1,6 @@
 # ADR 0004 · Login de usuario único que falla cerrado
 
-**Estado:** aceptada · 2026-09-16
+**Estado:** aceptada · 2026-09-16 · el registro y el paso a multiusuario están en el ADR 0015
 
 ## Decisión
 - `LoginView`/`LogoutView` de Django con `LoginRequiredMiddleware` (5.1+): toda vista requiere
@@ -12,4 +12,5 @@
 
 ## Consecuencias
 - Olvidar un decorador nunca deja una página abierta.
-- No hay registro ni recuperación de contraseña: la contraseña se cambia con `--reset-password`.
+- No hay recuperación de contraseña: se cambia con `--reset-password`. El registro abierto
+  llegó después (ADR 0015).

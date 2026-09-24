@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.companies.models import Company
+from apps.companies.personal import attach, for_user
 
 from . import services
 from .forms import RouteForm
@@ -18,7 +19,32 @@ from .planner import MAX_STOPS, walking_minutes
 
 
 def _stops(route: Route) -> list[RouteStop]:
-    return list(route.stops.select_related("company", "company__category", "company__enrichment"))
+    """Paradas con el encaje y el gancho del dueño de la ruta en cada empresa."""
+    stops = list(route.stops.select_related("company"))
+    companies = {
+        c.pk: c
+        for c in for_user(
+            Company.objects.filter(pk__in=[s.company_id for s in stops]).select_related(
+                "category", "enrichment"
+            ),
+            route.user,
+        )
+    }
+    for stop in stops:
+        stop.company = companies.get(stop.company_id, stop.company)
+    return stops
+
+
+def _own_route(request, pk) -> Route:
+    return get_object_or_404(Route.objects.select_related("zone", "user"), pk=pk, user=request.user)
+
+
+def _own_stop(request, pk) -> RouteStop:
+    return get_object_or_404(
+        RouteStop.objects.select_related("company", "route", "route__user"),
+        pk=pk,
+        route__user=request.user,
+    )
 
 
 def _route_context(route: Route | None) -> dict:
@@ -53,7 +79,7 @@ def _route_context(route: Route | None) -> dict:
 
 @require_GET
 def ruta(request):
-    route = Route.objects.select_related("zone").first()
+    route = Route.objects.filter(user=request.user).select_related("zone", "user").first()
     context = {"title": "Ruta", "form": RouteForm(), **_route_context(route)}
     for stop in context.get("stops", []):
         stop.walk_min = walking_minutes(stop.distance_m) if stop.distance_m else 0
@@ -64,11 +90,13 @@ def ruta(request):
 def ruta_crear(request):
     form = RouteForm(request.POST)
     if not form.is_valid():
-        route = Route.objects.first()
+        route = Route.objects.filter(user=request.user).first()
         context = {"title": "Ruta", "form": form, **_route_context(route)}
         return render(request, "routes/ruta.html", context, status=400)
     data = form.cleaned_data
-    services.create_route(data["date"], data["slot"], data["zone"], data["size"], form.start)
+    services.create_route(
+        request.user, data["date"], data["slot"], data["zone"], data["size"], form.start
+    )
     if form.location_ignored:
         messages.info(request, "Tu ubicación está fuera de Barcelona: salgo del centro de la zona.")
     return redirect("ruta")
@@ -76,18 +104,19 @@ def ruta_crear(request):
 
 @require_GET
 def modo_ruta(request, pk):
-    route = get_object_or_404(Route.objects.select_related("zone"), pk=pk)
+    route = _own_route(request, pk)
     context = {"title": "Modo ruta", "states": RouteStop.State, **_route_context(route)}
     return render(request, "routes/modo.html", context)
 
 
 @require_POST
 def parada_estado(request, pk):
-    stop = get_object_or_404(RouteStop.objects.select_related("company", "route"), pk=pk)
+    stop = _own_stop(request, pk)
     state = request.POST.get("state", "")
     if state not in RouteStop.State.values:
         return HttpResponseBadRequest("Estado desconocido")
     services.mark_stop(stop, state)
+    attach(stop.company, request.user)
     response = render(request, "routes/_stop.html", {"stop": stop, "states": RouteStop.State})
     response["HX-Trigger"] = json.dumps(
         {"toast": f"{stop.company.name}: {stop.get_state_display()}", "route-progress": True}
@@ -97,7 +126,7 @@ def parada_estado(request, pk):
 
 @require_GET
 def progreso(request, pk):
-    route = get_object_or_404(Route, pk=pk)
+    route = _own_route(request, pk)
     stops = list(route.stops.all())
     return render(
         request,
@@ -121,7 +150,7 @@ def anadir(request, company_pk):
     """Añade la empresa a la ruta en curso (o a una nueva para hoy): mapa y ficha."""
     company = get_object_or_404(Company, pk=company_pk, is_active=True)
     try:
-        route, stop = services.add_to_current_route(company)
+        route, stop = services.add_to_current_route(request.user, company)
     except services.RouteError as exc:
         text, in_route = str(exc), False
     else:
@@ -139,7 +168,7 @@ def anadir(request, company_pk):
 
 @require_POST
 def quitar(request, pk):
-    stop = get_object_or_404(RouteStop.objects.select_related("company", "route"), pk=pk)
+    stop = _own_stop(request, pk)
     try:
         services.remove_stop(stop)
     except services.RouteError as exc:
@@ -152,7 +181,7 @@ def quitar(request, pk):
 @require_POST
 def ordenar(request, pk):
     """Orden arrastrado a mano (ids separados por comas) o, con `auto`, por cercanía."""
-    route = get_object_or_404(Route.objects.select_related("zone"), pk=pk)
+    route = _own_route(request, pk)
     if request.POST.get("auto"):
         services.optimize(route)
         messages.success(request, "Paradas pendientes ordenadas por cercanía.")

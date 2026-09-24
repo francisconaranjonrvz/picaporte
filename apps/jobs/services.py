@@ -23,31 +23,55 @@ STALE_AFTER_BY_KIND = {JobRun.Kind.PERSONALIZE: timedelta(hours=2)}
 # Mientras corre la búsqueda personalizada no se lanza otro enriquecimiento: rastrearían
 # las mismas webs a la vez.
 BLOCKED_BY = {JobRun.Kind.ENRICH: (JobRun.Kind.PERSONALIZE,)}
+# Registro abierto: cada búsqueda personalizada gasta minutos de Actions y cuota de IA.
+PERSONAL_PER_DAY = 5
+LIMIT_ERROR = "Límite diario de búsquedas personalizadas"
 
 
-def _active(kind: str) -> JobRun | None:
-    job = JobRun.objects.filter(
+def _active(kind: str, user=None) -> JobRun | None:
+    jobs = JobRun.objects.filter(
         kind=kind, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
-    ).first()
+    )
+    if user is not None:
+        jobs = jobs.filter(user=user)
+    job = jobs.first()
     if job is not None:
         job = refresh_from_github(job)
     return job if job is not None and job.is_active else None
 
 
-def start_from_app(kind: str, inputs: dict[str, str] | None = None) -> JobRun:
+def start_from_app(kind: str, inputs: dict[str, str] | None = None, user=None) -> JobRun:
     """Crea el JobRun y dispara su workflow; el comando en Actions lo continúa por id.
 
-    Si ya hay uno activo del mismo tipo, o uno que lo bloquea (y sigue vivo en GitHub),
-    se devuelve ese.
+    Si ya hay uno activo del mismo tipo (del mismo usuario, en la búsqueda personalizada)
+    o uno que lo bloquea, y sigue vivo en GitHub, se devuelve ese.
     """
-    for other in (kind, *BLOCKED_BY.get(kind, ())):
+    if (active := _active(kind, user)) is not None:
+        return active
+    for other in BLOCKED_BY.get(kind, ()):
         if (active := _active(other)) is not None:
             return active
-    job = JobRun.objects.create(kind=kind, trigger=JobRun.Trigger.APP)
-    try:
-        dispatched = github.dispatch_workflow(
-            WORKFLOWS[kind], {"job_id": str(job.pk), **(inputs or {})}
+    inputs = dict(inputs or {})
+    if user is not None:
+        today = timezone.localdate()
+        launched = (
+            JobRun.objects.filter(kind=kind, user=user, created_at__date=today)
+            .exclude(error__startswith=LIMIT_ERROR)
+            .count()
         )
+        if launched >= PERSONAL_PER_DAY:
+            return JobRun.objects.create(
+                kind=kind,
+                user=user,
+                trigger=JobRun.Trigger.APP,
+                status=JobRun.Status.FAILED,
+                finished_at=timezone.now(),
+                error=f"{LIMIT_ERROR} ({PERSONAL_PER_DAY}): vuelve a intentarlo mañana.",
+            )
+        inputs["user_id"] = str(user.pk)
+    job = JobRun.objects.create(kind=kind, trigger=JobRun.Trigger.APP, user=user)
+    try:
+        dispatched = github.dispatch_workflow(WORKFLOWS[kind], {"job_id": str(job.pk), **inputs})
     except github.GitHubError as exc:
         job.mark_finished(stats={}, summary="", error=str(exc))
         return job

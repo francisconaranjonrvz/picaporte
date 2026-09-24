@@ -9,6 +9,9 @@ on:
         description: "Id del JobRun creado por la app (vacío si se lanza a mano)"
         required: false
         default: ""
+      user_id:
+        description: "Id del usuario cuyo perfil se puntúa"
+        required: true
       discover:
         description: "Buscar empresas nuevas antes de puntuar (1) o solo puntuar (0)"
         required: false
@@ -16,14 +19,15 @@ on:
         type: choice
         options: ["1", "0"]
 
-run-name: "personalize discover=${{ inputs.discover || '1' }} [job ${{ inputs.job_id || 'manual' }}]"
+run-name: "personalize user=${{ inputs.user_id }} discover=${{ inputs.discover || '1' }} [job ${{ inputs.job_id || 'manual' }}]"
 
 permissions:
   contents: read
 
-# Escribe empresas como discover.yml: mismo grupo, nunca dos a la vez contra Neon.
+# Una por usuario (una nueva espera a la anterior). Varios usuarios sí van en paralelo:
+# el descubrimiento y la lectura de webs se serializan con candados de Postgres.
 concurrency:
-  group: neon-prod-db
+  group: personalize-${{ inputs.user_id }}
   cancel-in-progress: false
 
 jobs:
@@ -51,9 +55,11 @@ jobs:
         env:
           DISCOVER: ${{ inputs.discover || '1' }}
           JOB_ID: ${{ inputs.job_id }}
+          USER_ID: ${{ inputs.user_id }}
         run: |
           [[ "$DISCOVER" =~ ^[01]$ ]] || { echo "discover no válido" >&2; exit 1; }
-          args=(--max-minutes 45)
+          [[ "$USER_ID" =~ ^[0-9]+$ ]] || { echo "user_id no válido" >&2; exit 1; }
+          args=(--max-minutes 45 --user-id "$USER_ID")
           if [[ "$DISCOVER" == "0" ]]; then
             args+=(--skip-discover)
           fi

@@ -29,6 +29,7 @@ STATE_TO_VISIT = {
 
 @transaction.atomic
 def create_route(
+    user,
     day: date,
     slot: str,
     zone: Zone | None,
@@ -36,13 +37,14 @@ def create_route(
     start: tuple[float, float] | None = None,
 ) -> Route:
     route = Route.objects.create(
+        user=user,
         date=day,
         slot=slot,
         zone=zone,
         start_lat=start[0] if start else None,
         start_lng=start[1] if start else None,
     )
-    stops, origin = plan(day, route.times, zone, size, start)
+    stops, origin = plan(user, day, route.times, zone, size, start)
     previous = origin
     for position, candidate in enumerate(stops, start=1):
         RouteStop.objects.create(
@@ -62,9 +64,9 @@ class RouteError(Exception):
     """Cambio no permitido en una ruta (llena, parada ya resuelta...)."""
 
 
-def current_route() -> Route | None:
-    """La ruta en la que se añaden empresas: la última, si no es de un día pasado."""
-    route = Route.objects.select_related("zone").first()
+def current_route(user) -> Route | None:
+    """La ruta en la que se añaden empresas: la última del usuario, si no es de un día pasado."""
+    route = Route.objects.filter(user=user).select_related("zone").first()
     if route is None or route.date < timezone.localdate():
         return None
     return route
@@ -125,11 +127,11 @@ def add_stop(route: Route, company: Company) -> RouteStop:
     return stop
 
 
-def add_to_current_route(company: Company) -> tuple[Route, RouteStop]:
+def add_to_current_route(user, company: Company) -> tuple[Route, RouteStop]:
     """Desde el mapa o la ficha: a la ruta en curso o, si no hay, a una nueva para hoy."""
-    route = current_route()
+    route = current_route(user)
     if route is None:
-        route = Route.objects.create(date=timezone.localdate(), slot=Route.Slot.DAY)
+        route = Route.objects.create(user=user, date=timezone.localdate(), slot=Route.Slot.DAY)
     return route, add_stop(route, company)
 
 
@@ -200,6 +202,7 @@ def maps_legs(stops: list[RouteStop]) -> list[tuple[int, int, str]]:
 @transaction.atomic
 def mark_stop(stop: RouteStop, state: str) -> RouteStop:
     """Marca la parada y refleja el resultado en el seguimiento; "pendiente" deshace."""
+    user = stop.route.user
     if state == RouteStop.State.PENDING:
         # Solo se restaura si nadie ha cambiado el estado después (ficha u otra ruta).
         applied = STATE_TO_VISIT.get(stop.state)
@@ -207,22 +210,24 @@ def mark_stop(stop: RouteStop, state: str) -> RouteStop:
             stop.is_done
             and stop.previous_status
             and applied is not None
-            and tracking.visit_for(stop.company).status == applied
+            and tracking.visit_for(user, stop.company).status == applied
         ):
-            tracking.set_status(stop.company, stop.previous_status)
+            tracking.set_status(user, stop.company, stop.previous_status)
         stop.previous_status = ""
     elif not stop.is_done:
-        stop.previous_status = tracking.visit_for(stop.company).status
+        stop.previous_status = tracking.visit_for(user, stop.company).status
     if state != RouteStop.State.CLOSED and stop.closed_note_id:
         stop.closed_note.delete()
         stop.closed_note = None
     elif state == RouteStop.State.CLOSED and stop.closed_note_id is None:
         stop.closed_note = Note.objects.create(
-            company=stop.company, text=f"Cerrada al pasar en la ruta del {stop.route.date:%d/%m}."
+            user=user,
+            company=stop.company,
+            text=f"Cerrada al pasar en la ruta del {stop.route.date:%d/%m}.",
         )
     stop.state = state
     stop.save(update_fields=["state", "previous_status", "closed_note", "updated_at"])
     status = STATE_TO_VISIT.get(state)
     if status is not None:
-        tracking.set_status(stop.company, status)
+        tracking.set_status(user, stop.company, status)
     return stop

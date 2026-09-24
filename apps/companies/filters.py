@@ -1,4 +1,7 @@
-"""Filtros de la lista de Explorar y del mapa (mismos parámetros GET en ambos)."""
+"""Filtros de la lista de Explorar y del mapa (mismos parámetros GET en ambos).
+
+Encaje, estado, favoritas y ofertas son del usuario que mira (`personal.for_user`).
+"""
 
 from django import forms
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
@@ -10,6 +13,7 @@ from apps.tracking.models import Visit
 
 from .models import Company
 from .opening import opening_for
+from .personal import for_user
 
 SCORE_CHOICES = [
     ("", "Cualquier encaje"),
@@ -50,8 +54,9 @@ class CompanyFilter(forms.Form):
     offers = forms.BooleanField(required=False, label="Con ofertas")
     sort = forms.ChoiceField(required=False, choices=SORT_CHOICES, label="Orden")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.user = user
         self.fields["category"].queryset = Category.objects.filter(is_active=True)
         self.fields["zone"].queryset = Zone.objects.filter(is_active=True)
         self.fields["status"].choices = [
@@ -83,22 +88,22 @@ class CompanyFilter(forms.Form):
 
         `after`: solo las empresas que van detrás de esa en el orden elegido ("Cargar más").
         """
-        qs = qs if qs is not None else base_queryset()
+        qs = qs if qs is not None else base_queryset(self.user)
         data = self.values()
         if data["q"]:
             qs = qs.filter(
                 Q(name__icontains=data["q"]) | Q(enrichment__services__icontains=data["q"])
             )
         if data["score"]:
-            qs = qs.filter(enrichment__fit_score__gte=int(data["score"]))
+            qs = qs.filter(fit__gte=int(data["score"]))
         if data["category"]:
             qs = qs.filter(category=data["category"])
         if data["zone"]:
             qs = qs.filter(zone=data["zone"])
         if data["status"] == "sin_estado":
-            qs = qs.filter(Q(visit__isnull=True) | Q(visit__status=Visit.Status.PENDING))
+            qs = qs.filter(Q(visit_status__isnull=True) | Q(visit_status=Visit.Status.PENDING))
         elif data["status"]:
-            qs = qs.filter(visit__status=data["status"])
+            qs = qs.filter(visit_status=data["status"])
         if data["catalan"] == "requerido":
             qs = qs.filter(enrichment__requires_catalan="si")
         elif data["catalan"] == "no_requerido":
@@ -106,7 +111,7 @@ class CompanyFilter(forms.Form):
         if data["confidence"]:
             qs = qs.filter(confidence_score__gte=int(data["confidence"]))
         if data["favorites"]:
-            qs = qs.filter(favorite__isnull=False)
+            qs = qs.filter(is_favorite=True)
         if data["offers"]:
             qs = qs.filter(has_offers=True)
         sort = data["sort"] or "encaje"
@@ -122,7 +127,7 @@ class CompanyFilter(forms.Form):
 # El pk final desempata: el orden es total y "Cargar más" puede seguir desde una empresa.
 ORDERINGS = {
     "encaje": [
-        F("enrichment__fit_score").desc(nulls_last=True),
+        F("fit").desc(nulls_last=True),
         "-confidence_score",
         "name",
         "pk",
@@ -145,20 +150,14 @@ def _after(sort: str, anchor: Company) -> Q:
     by_confidence = Q(confidence_score__lt=confidence) | (Q(confidence_score=confidence) & by_name)
     if sort == "confianza":
         return by_confidence
-    enrichment = getattr(anchor, "enrichment", None)
-    score = enrichment.fit_score if enrichment else None
+    score = getattr(anchor, "fit", None)  # `anchor` viene anotado por `for_user`
     if score is None:  # los sin puntuar van al final
-        return Q(enrichment__fit_score__isnull=True) & by_confidence
-    return (
-        Q(enrichment__fit_score__lt=score)
-        | Q(enrichment__fit_score__isnull=True)
-        | (Q(enrichment__fit_score=score) & by_confidence)
-    )
+        return Q(fit__isnull=True) & by_confidence
+    return Q(fit__lt=score) | Q(fit__isnull=True) | (Q(fit=score) & by_confidence)
 
 
-def base_queryset() -> QuerySet[Company]:
-    return (
-        Company.objects.filter(is_active=True)
-        .select_related("category", "zone", "enrichment", "visit", "favorite")
-        .annotate(has_offers=Exists(active_offers().filter(company=OuterRef("pk"))))
+def base_queryset(user) -> QuerySet[Company]:
+    qs = Company.objects.filter(is_active=True).select_related("category", "zone", "enrichment")
+    return for_user(qs, user).annotate(
+        has_offers=Exists(active_offers(user).filter(company=OuterRef("pk")))
     )

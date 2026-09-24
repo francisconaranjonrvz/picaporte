@@ -172,7 +172,9 @@ def test_refresh_from_github_cierra_jobs_huerfanos(token, monkeypatch):
     assert "failure" in job.error
 
 
-def test_boton_y_estado_por_htmx(auth_client, token, monkeypatch):
+def test_boton_y_estado_por_htmx(auth_client, user, token, monkeypatch):
+    user.is_staff = True
+    user.save()
     monkeypatch.setattr(
         services.github,
         "dispatch_workflow",
@@ -217,7 +219,9 @@ def test_las_rutas_de_jobs_requieren_login(client, db):
     assert client.get(reverse("job_status", args=["discover"])).status_code == 302
 
 
-def test_enriquecimiento_desde_la_app_pasa_el_modo(auth_client, token, monkeypatch):
+def test_enriquecimiento_desde_la_app_pasa_el_modo(auth_client, user, token, monkeypatch):
+    user.is_staff = True
+    user.save()
     dispatched = []
 
     def fake_dispatch(workflow, inputs):
@@ -266,3 +270,12 @@ def test_al_terminar_el_trabajo_el_sondeo_avisa_a_la_pagina(auth_client, db):
     assert json.loads(resp["HX-Trigger"]) == {"job-finished": "enrich"}
     assert "HX-Refresh" not in resp
     assert "data-reload-on-job-finished" in auth_client.get(reverse("datos")).text
+
+
+def test_los_trabajos_globales_solo_los_lanza_staff(auth_client, token, monkeypatch):
+    monkeypatch.setattr(
+        services.github, "dispatch_workflow", lambda wf, inputs: pytest.fail("no debe lanzar")
+    )
+    for kind in ("discover", "enrich"):
+        assert auth_client.post(reverse("job_trigger", args=[kind])).status_code == 403
+    assert not JobRun.objects.exists()

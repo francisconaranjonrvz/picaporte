@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.companies.models import Company
+from apps.core.testing import owner
 from apps.offers import importers, services
 from apps.offers.importers import ImportFormatError, parse
 from apps.offers.models import JobOffer, active_offers
@@ -136,20 +137,20 @@ def test_fechas_iso_y_de_excel_en_espanol(value, expected):
 
 def test_csv_de_excel_con_fecha_antigua_no_sale_como_activa(db):
     csv_text = "Título;Empresa;Enlace;Fecha\nJunior PR;Sol;https://sol.es/empleo;15/03/2025\n"
-    services.import_offers(parse("ofertas.csv", csv_text.encode("cp1252")))
+    services.import_offers(owner(), parse("ofertas.csv", csv_text.encode("cp1252")))
     offer = JobOffer.objects.get()
     assert offer.published_on == date(2025, 3, 15)
-    assert not active_offers().exists()
+    assert not active_offers(owner()).exists()
 
 
 def test_reimportar_una_oferta_sin_fecha_la_mantiene_activa(db):
     csv_text = "title,company,url\nJunior PR,Sol,https://sol.es/empleo\n"
-    services.import_offers(parse("ofertas.csv", csv_text.encode()))
+    services.import_offers(owner(), parse("ofertas.csv", csv_text.encode()))
     JobOffer.objects.update(imported_at=timezone.now() - timedelta(days=60))
-    assert not active_offers().exists()
+    assert not active_offers(owner()).exists()
 
-    services.import_offers(parse("ofertas.csv", csv_text.encode()))  # sigue en el export
-    assert active_offers().count() == 1
+    services.import_offers(owner(), parse("ofertas.csv", csv_text.encode()))  # sigue en el export
+    assert active_offers(owner()).count() == 1
 
 
 def test_archivo_demasiado_grande(monkeypatch):
@@ -178,16 +179,16 @@ def test_cruce_por_dominio_nombre_y_parecido(companies):
 
 
 def test_importar_crea_actualiza_y_cruza(companies):
-    stats = services.import_offers(parse("scan-history.tsv", CAREER_OPS.encode()))
+    stats = services.import_offers(owner(), parse("scan-history.tsv", CAREER_OPS.encode()))
     assert (stats.created, stats.updated, stats.matched, stats.skipped) == (3, 0, 3, 2)
     assert len(stats.matched_companies) == 3
 
-    stats = services.import_offers(parse("scan-history.tsv", CAREER_OPS.encode()))
+    stats = services.import_offers(owner(), parse("scan-history.tsv", CAREER_OPS.encode()))
     assert (stats.created, stats.updated) == (0, 3)  # por URL: no duplica
     assert JobOffer.objects.count() == 3
 
     # Activas: vistas en los últimos 45 días (la de Buzz se publicó hace 90).
-    assert set(active_offers().values_list("company__name", flat=True)) == {
+    assert set(active_offers(owner()).values_list("company__name", flat=True)) == {
         "Ogilvy",
         "Estudi Cactus",
     }
@@ -195,16 +196,16 @@ def test_importar_crea_actualiza_y_cruza(companies):
 
 
 def test_recruzar_tras_descubrir_empresas(db):
-    services.import_offers(parse("scan-history.tsv", CAREER_OPS.encode()))
+    services.import_offers(owner(), parse("scan-history.tsv", CAREER_OPS.encode()))
     assert JobOffer.objects.filter(company__isnull=False).count() == 0
     Company.objects.create(name="Ogilvy")
-    assert services.rematch_all() == 1
+    assert services.rematch_all(owner()) == 1
 
 
 def test_comando_import_offers(companies, tmp_path, capsys):
     path = tmp_path / "scan-history.tsv"
     path.write_text(CAREER_OPS, encoding="utf-8")
-    call_command("import_offers", str(path))
+    call_command("import_offers", str(path), "--user", owner().username)
     assert "3 ofertas (3 nuevas" in capsys.readouterr().out
 
 
@@ -232,7 +233,7 @@ def test_pagina_de_ofertas_importar_y_filtros(auth_client, companies):
 
 
 def test_explorar_y_ficha_muestran_ofertas_activas(auth_client, companies):
-    services.import_offers(parse("scan-history.tsv", CAREER_OPS.encode()))
+    services.import_offers(owner(), parse("scan-history.tsv", CAREER_OPS.encode()))
     html = auth_client.get(reverse("explorar") + "?offers=on").text
     assert ">Ogilvy</h2>" in html
     assert ">Estudi Cactus</h2>" in html
@@ -243,3 +244,17 @@ def test_explorar_y_ficha_muestran_ofertas_activas(auth_client, companies):
     html = auth_client.get(reverse("ficha", args=[companies["ogilvy"].pk])).text
     assert "Junior Copywriter" in html
     assert "boards.greenhouse.io/ogilvy/1" in html
+
+
+def test_las_ofertas_son_de_cada_cuenta(auth_client, companies, other_user):
+    services.import_offers(owner(), parse("scan-history.tsv", CAREER_OPS.encode()))
+    services.import_offers(other_user, parse("scan-history.tsv", CAREER_OPS.encode()))
+    assert (
+        JobOffer.objects.filter(user=other_user).count()
+        == JobOffer.objects.filter(user=owner()).count()
+    )  # la misma URL puede estar en dos cuentas
+
+    JobOffer.objects.filter(user=other_user).delete()
+    auth_client.force_login(other_user)
+    html = auth_client.get(reverse("explorar") + "?offers=on").text
+    assert ">Ogilvy</h2>" not in html  # las ofertas de Laura no cuentan para Marta

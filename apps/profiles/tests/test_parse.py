@@ -153,3 +153,18 @@ def test_parse_cv_usa_el_prompt_versionado_y_el_pdf(user, monkeypatch):
     assert captured["pdf_bytes"] == PDF
     assert captured["output_model"] is ParsedCV
     assert "nunca inventes" in captured["system"]
+
+
+@pytest.mark.django_db
+def test_cupo_diario_de_analisis_del_cv(auth_client, user, monkeypatch):
+    profile = Profile.objects.create(user=user)
+    save_cv(profile, "cv.pdf", PDF)
+    calls = []
+    monkeypatch.setattr(views, "parse_cv", lambda cv: calls.append(1) or _result(profile))
+
+    for _ in range(services.MAX_PARSES_PER_DAY):
+        auth_client.post(reverse("cv_parse"), HTTP_HX_REQUEST="true")
+    resp = auth_client.post(reverse("cv_parse"), HTTP_HX_REQUEST="true")
+
+    assert len(calls) == services.MAX_PARSES_PER_DAY  # la IA no se llama más hoy
+    assert "vuelve a probar mañana" in resp.text

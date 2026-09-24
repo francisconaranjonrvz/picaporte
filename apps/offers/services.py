@@ -78,16 +78,18 @@ class ImportStats:
 
 
 @transaction.atomic
-def import_offers(result: ParseResult) -> ImportStats:
-    """Crea o actualiza (por URL) cada oferta y la cruza con su empresa."""
+def import_offers(user, result: ParseResult) -> ImportStats:
+    """Crea o actualiza (por URL, dentro del usuario) cada oferta y la cruza con su empresa."""
     matcher = CompanyMatcher()
     stats = ImportStats(skipped=result.skipped)
-    existing = {o.url: o for o in JobOffer.objects.filter(url__in=[r.url for r in result.rows])}
+    existing = {
+        o.url: o for o in JobOffer.objects.filter(user=user, url__in=[r.url for r in result.rows])
+    }
     to_create, to_update = [], []
     now = timezone.now()
     for row in {r.url: r for r in result.rows}.values():  # URLs repetidas: gana la última
         company, how = matcher.match(row.company, row.url)
-        offer = existing.get(row.url) or JobOffer(url=row.url)
+        offer = existing.get(row.url) or JobOffer(user=user, url=row.url)
         # Última vez vista: las ofertas sin fecha siguen activas mientras se reimporten.
         offer.imported_at = now
         offer.title = row.title
@@ -126,10 +128,10 @@ def import_offers(result: ParseResult) -> ImportStats:
     return stats
 
 
-def rematch_all() -> int:
-    """Vuelve a cruzar todas las ofertas (p. ej. tras descubrir empresas nuevas)."""
+def rematch_all(user) -> int:
+    """Vuelve a cruzar las ofertas del usuario (p. ej. tras descubrir empresas nuevas)."""
     matcher = CompanyMatcher()
-    offers = list(JobOffer.objects.all())
+    offers = list(JobOffer.objects.filter(user=user))
     for offer in offers:
         offer.company, offer.match = matcher.match(offer.company_name, offer.url)
     JobOffer.objects.bulk_update(offers, ["company", "match"], batch_size=500)

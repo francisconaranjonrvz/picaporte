@@ -2,13 +2,19 @@
 
 import pytest
 
+from apps.core.testing import owner
+
 
 @pytest.fixture
-def user(db, django_user_model):
-    """El usuario único de la app, creado en la BD de test."""
-    return django_user_model.objects.create_user(
-        username="laura", email="laura@example.com", password="secreta-123"
-    )
+def user(db):
+    """La cuenta principal de los tests ("laura"), dueña de perfil, favoritas y rutas."""
+    return owner()
+
+
+@pytest.fixture
+def other_user(db):
+    """Otra cuenta, para comprobar que nadie ve los datos de los demás."""
+    return owner("marta")
 
 
 @pytest.fixture

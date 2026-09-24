@@ -27,7 +27,7 @@
 {% if favorites %}
 <ul id="favorites" class="space-y-3" data-reorder-url="{% url 'favorites_reorder' %}">
   {% for fav in favorites %}
-  {% with company=fav.company e=fav.company.enrichment v=fav.company.visit %}
+  {% with company=fav.company v=fav.company.visit %}
   <li class="card flex items-start gap-2" data-id="{{ company.pk }}">
     <button type="button" class="drag-handle -ml-1 flex size-11 shrink-0 cursor-grab items-center justify-center text-muted active:cursor-grabbing" aria-label="Arrastrar para reordenar {{ company.name }}">{% icon "grip" "size-5" %}</button>
     <div class="min-w-0 flex-1">
@@ -36,7 +36,7 @@
           <h2 class="truncate font-bold">{{ company.name }}</h2>
           <p class="truncate text-sm text-muted">{{ company.category.name|default:"Sin categoría" }}{% if company.zone %} · {{ company.zone.name }}{% endif %}</p>
         </a>
-        {% if e.fit_score is not None %}<span class="badge {% if e.fit_score >= 70 %}badge-success{% elif e.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} shrink-0">{{ e.fit_score }}</span>{% endif %}
+        {% include "enrichment/_score_badge.html" with e=company.score compact=True %}
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-2">
         <label class="sr-only" for="prio-{{ company.pk }}">Prioridad</label>

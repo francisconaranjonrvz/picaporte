@@ -58,6 +58,9 @@ class Profile(models.Model):
     # Sectores con los que se hizo la última búsqueda de empresas (búsqueda personalizada):
     # si los del perfil cambian, al guardarlo se vuelve a buscar.
     discovered_sectors = models.JSONField(default=list, blank=True)
+    # Cupo diario de análisis de CV con IA (registro abierto: que nadie agote la cuota).
+    parses_on = models.DateField(null=True, blank=True)
+    parses_today = models.PositiveSmallIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

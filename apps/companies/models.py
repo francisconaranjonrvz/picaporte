@@ -65,6 +65,19 @@ class Company(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    # Datos del usuario que mira la empresa, precargados por `personal.for_user`/`attach`.
+    @property
+    def score(self):
+        return _first(self, "my_scores")
+
+    @property
+    def visit(self):
+        return _first(self, "my_visits")
+
+    @property
+    def favorite(self):
+        return _first(self, "my_favorites")
+
     @property
     def source_names(self) -> list[str]:
         return list(self.records.values_list("source", flat=True))
@@ -83,6 +96,11 @@ class Company(models.Model):
     def tel_url(self) -> str:
         digits = "".join(ch for ch in self.phone if ch.isdigit() or ch == "+")
         return f"tel:{digits}" if digits else ""
+
+
+def _first(company: Company, attr: str):
+    rows = getattr(company, attr, None)
+    return rows[0] if rows else None
 
 
 class SourceRecord(models.Model):

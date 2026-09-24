@@ -8,13 +8,23 @@ import hashlib
 
 from apps.profiles.models import CompanySize, Profile, WorkLanguage
 
-from .models import Enrichment
+from .models import FitScore
 
 SCORE_PROMPT = "enrich_score_v2"
 
 
-def current_profile() -> Profile | None:
-    return Profile.objects.order_by("pk").prefetch_related("categories", "zones").first()
+def profile_for(user) -> Profile | None:
+    return (
+        Profile.objects.filter(user=user).prefetch_related("categories", "zones").first()
+        if user is not None and user.is_authenticated
+        else None
+    )
+
+
+def usable_profiles() -> list[Profile]:
+    """Perfiles con datos suficientes para puntuar (los de todas las cuentas)."""
+    profiles = Profile.objects.select_related("user").prefetch_related("categories", "zones")
+    return [p for p in profiles.order_by("pk") if profile_is_usable(p)]
 
 
 def profile_brief(profile: Profile) -> str:
@@ -53,14 +63,12 @@ def profile_is_usable(profile: Profile | None) -> bool:
     return profile is not None and profile.has_parsed_data
 
 
-def stale_scores_count(profile: Profile | None = None) -> int:
-    """Empresas cuya puntuación no corresponde al perfil actual (para el aviso de la UI)."""
-    profile = profile or current_profile()
+def stale_scores_count(profile: Profile | None) -> int:
+    """Empresas puntuadas con una versión anterior de este perfil (para el aviso de la UI)."""
     if not profile_is_usable(profile):
         return 0
-    fingerprint = profile_fingerprint(profile)
     return (
-        Enrichment.objects.filter(company__is_active=True, scored_at__isnull=False)
-        .exclude(profile_hash=fingerprint)
+        FitScore.objects.filter(user_id=profile.user_id, company__is_active=True)
+        .exclude(profile_hash=profile_fingerprint(profile))
         .count()
     )

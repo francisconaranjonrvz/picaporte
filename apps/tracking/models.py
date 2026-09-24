@@ -1,4 +1,4 @@
-"""Seguimiento de la búsqueda: favoritas, estado de cada empresa y notas.
+"""Seguimiento de la búsqueda de cada usuario: favoritas, estado de cada empresa y notas.
 
 - `Favorite`: la lista corta, con prioridad y orden manual (arrastrar y soltar).
 - `Visit`: el estado actual de cada empresa (una fila por empresa, creada al tocarla),
@@ -6,6 +6,7 @@
 - `Note`: historial en orden cronológico; cada cambio de estado deja también una nota.
 """
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -18,7 +19,10 @@ class Favorite(models.Model):
         MEDIUM = "media", "Media"
         LOW = "baja", "Baja"
 
-    company = models.OneToOneField(Company, related_name="favorite", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="favorites", on_delete=models.CASCADE
+    )
+    company = models.ForeignKey(Company, related_name="favorites", on_delete=models.CASCADE)
     priority = models.CharField(
         "prioridad", max_length=8, choices=Priority.choices, default=Priority.MEDIUM
     )
@@ -28,6 +32,9 @@ class Favorite(models.Model):
 
     class Meta:
         ordering = ["position", "-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "company"], name="unique_user_favorite")
+        ]
         verbose_name = "favorita"
         verbose_name_plural = "favoritas"
 
@@ -54,7 +61,10 @@ class Visit(models.Model):
         Status.DISCARDED: "badge-danger",
     }
 
-    company = models.OneToOneField(Company, related_name="visit", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="visits", on_delete=models.CASCADE
+    )
+    company = models.ForeignKey(Company, related_name="visits", on_delete=models.CASCADE)
     status = models.CharField(
         "estado", max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
     )
@@ -65,6 +75,9 @@ class Visit(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "company"], name="unique_user_visit")
+        ]
         verbose_name = "visita"
         verbose_name_plural = "visitas"
 
@@ -77,6 +90,9 @@ class Visit(models.Model):
 
 
 class Note(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="notes", on_delete=models.CASCADE
+    )
     company = models.ForeignKey(Company, related_name="notes", on_delete=models.CASCADE)
     text = models.TextField("nota")
     is_status_change = models.BooleanField(default=False)

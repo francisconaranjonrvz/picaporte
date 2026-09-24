@@ -7,6 +7,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.core.testing import owner
 from apps.routes import services
 from apps.routes.models import Route, RouteStop
 from apps.routes.planner import MAX_STOPS
@@ -17,7 +18,7 @@ from .test_routes import _company
 @pytest.fixture
 def route(db):
     """Ruta de hoy con tres paradas en línea de oeste a este."""
-    route = Route.objects.create(date=timezone.localdate(), slot=Route.Slot.DAY)
+    route = Route.objects.create(user=owner(), date=timezone.localdate(), slot=Route.Slot.DAY)
     route.start_lat, route.start_lng = 41.39, 2.140
     route.save()
     for i, lng in enumerate((2.150, 2.160, 2.170), start=1):
@@ -94,7 +95,7 @@ def test_ordenar_por_cercania_deja_lo_visitado_delante(route):
 
 
 def test_desde_la_ficha_se_anade_a_la_ruta_en_curso_o_a_una_nueva(auth_client):
-    old = Route.objects.create(date=timezone.localdate() - timedelta(days=3))
+    old = Route.objects.create(user=owner(), date=timezone.localdate() - timedelta(days=3))
     company = _company("Buzz", 41.39, 2.16)
 
     resp = auth_client.post(reverse("ruta_anadir", args=[company.pk]), follow=True)
@@ -143,3 +144,17 @@ def test_con_mas_de_diez_paradas_google_maps_va_por_tramos(auth_client, route):
     assert "12 paradas" in text
     assert "Abrir en Google Maps</a>" not in text  # un enlace solo admite 10
     assert "Paradas 9-12" in text
+
+
+def test_las_rutas_de_otra_cuenta_no_se_tocan(client, route, other_user):
+    stop = route.stops.first()
+    client.force_login(other_user)
+    assert client.post(reverse("parada_quitar", args=[stop.pk])).status_code == 404
+    assert client.post(reverse("ruta_ordenar", args=[route.pk]), {"auto": "1"}).status_code == 404
+    assert client.get(reverse("modo_ruta", args=[route.pk])).status_code == 404
+    assert "P1" not in client.get(reverse("ruta")).text
+
+    # Añadir desde la ficha crea su propia ruta, no toca la de Laura.
+    client.post(reverse("ruta_anadir", args=[stop.company_id]))
+    assert Route.objects.filter(user=other_user).count() == 1
+    assert route.stops.count() == 3

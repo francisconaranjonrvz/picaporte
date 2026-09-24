@@ -1,5 +1,5 @@
 {% load ui %}
-{% with company=stop.company e=stop.company.enrichment %}
+{% with company=stop.company e=stop.company.score %}
 <li id="stop-{{ stop.pk }}" class="card {% if stop.is_done %}opacity-70{% endif %}">
   <div class="flex items-start gap-3">
     <span class="flex size-8 shrink-0 items-center justify-center rounded-full {% if stop.is_done %}bg-success text-success-ink{% else %}bg-action-fill text-white{% endif %} font-bold">{{ stop.position }}</span>

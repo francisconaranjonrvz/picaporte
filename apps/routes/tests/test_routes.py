@@ -8,7 +8,9 @@ from django.urls import reverse
 
 from apps.catalog.models import Zone
 from apps.companies.models import Company
-from apps.enrichment.models import Enrichment
+from apps.companies.personal import for_user
+from apps.core.testing import owner
+from apps.enrichment.models import Enrichment, FitScore
 from apps.routes import planner, services
 from apps.routes.models import Route, RouteStop
 from apps.tracking import services as tracking
@@ -28,7 +30,8 @@ def _company(name, lat, lng, score=None, zone="eixample", hours="", **kw):
         **kw,
     )
     if score is not None:
-        Enrichment.objects.create(company=company, crawl_status="ok", fit_score=score)
+        Enrichment.objects.create(company=company, crawl_status="ok")
+        FitScore.objects.create(user=owner(), company=company, fit_score=score)
     return company
 
 
@@ -40,19 +43,17 @@ def eixample(db):
 def test_prioridad_favoritas_encaje_y_estado(db):
     base = _company("Base", 41.39, 2.16, score=50)
     fav = _company("Fav", 41.39, 2.16, score=50)
-    Favorite.objects.create(company=fav, priority=Favorite.Priority.HIGH)
+    Favorite.objects.create(user=owner(), company=fav, priority=Favorite.Priority.HIGH)
     volver = _company("Volver", 41.39, 2.16, score=50)
-    Visit.objects.create(company=volver, status=Visit.Status.RETURN, next_action_on=TUESDAY)
+    Visit.objects.create(
+        user=owner(), company=volver, status=Visit.Status.RETURN, next_action_on=TUESDAY
+    )
 
-    p = {
-        c.name: planner.priority_for(c, TUESDAY)
-        for c in Company.objects.select_related("enrichment", "visit", "favorite")
-    }
+    p = {c.name: planner.priority_for(c, TUESDAY) for c in for_user(Company.objects.all(), owner())}
     assert p["Fav"] - p["Base"] == 45  # favorita de prioridad alta
     assert p["Volver"] - p["Base"] == 20 + 25  # estado "volver" + próxima acción ese día
-    assert planner.priority_for(_company("Sin nota", 41.39, 2.16), TUESDAY) == pytest.approx(
-        0.6 * 30
-    )
+    sin_nota = for_user(Company.objects.filter(pk=_company("Sin nota", 41.39, 2.16).pk), owner())
+    assert planner.priority_for(sin_nota.get(), TUESDAY) == pytest.approx(0.6 * 30)
     assert base  # la base no tiene bonus
 
 
@@ -63,12 +64,12 @@ def test_candidatas_filtran_zona_horario_y_resueltas(eixample):
     _company("Otra zona", 41.40, 2.20, zone="poblenou")
     _company("Sin coordenadas", None, None)
     entregada = _company("Entregada", 41.39, 2.16)
-    Visit.objects.create(company=entregada, status=Visit.Status.CV_DELIVERED)
+    Visit.objects.create(user=owner(), company=entregada, status=Visit.Status.CV_DELIVERED)
 
-    names = {c.company.name for c in planner.candidates(TUESDAY, MORNING, eixample)}
+    names = {c.company.name for c in planner.candidates(owner(), TUESDAY, MORNING, eixample)}
     assert names == {"Abierta", "Sin horario"}
     sunday = date(2026, 9, 27)
-    assert planner.candidates(sunday, MORNING, eixample) == []
+    assert planner.candidates(owner(), sunday, MORNING, eixample) == []
 
 
 def test_orden_por_cercania_mejora_el_recorrido(db):
@@ -85,11 +86,11 @@ def test_orden_por_cercania_mejora_el_recorrido(db):
 def test_plan_limita_paradas_y_elige_las_prioritarias(eixample):
     for i in range(24):
         _company(f"E{i:02d}", 41.385 + i * 0.0005, 2.16, score=40 + i)
-    stops, origin = planner.plan(TUESDAY, MORNING, eixample, size=25)
+    stops, origin = planner.plan(owner(), TUESDAY, MORNING, eixample, size=25)
     assert len(stops) == planner.MAX_STOPS == 20  # 25 se recorta a 20
     assert {c.company.name for c in stops} == {f"E{i:02d}" for i in range(4, 24)}
     assert origin == planner.zone_center(eixample)
-    stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=1)
+    stops, _ = planner.plan(owner(), TUESDAY, MORNING, eixample, size=1)
     assert len(stops) == planner.MIN_STOPS
 
 
@@ -97,7 +98,9 @@ def test_crear_ruta_calcula_distancias_sin_tocar_el_seguimiento(eixample):
     for i in range(7):
         _company(f"E{i}", 41.385 + i * 0.002, 2.16, score=60)
 
-    route = services.create_route(TUESDAY, Route.Slot.MORNING, eixample, 6, start=(41.385, 2.16))
+    route = services.create_route(
+        owner(), TUESDAY, Route.Slot.MORNING, eixample, 6, start=(41.385, 2.16)
+    )
     stops = list(route.stops.select_related("company"))
     assert len(stops) == 6
     assert [s.position for s in stops] == [1, 2, 3, 4, 5, 6]
@@ -107,7 +110,7 @@ def test_crear_ruta_calcula_distancias_sin_tocar_el_seguimiento(eixample):
 
 
 def _stops(n):
-    route = Route.objects.create(date=TUESDAY)
+    route = Route.objects.create(user=owner(), date=TUESDAY)
     return [
         RouteStop.objects.create(
             route=route,
@@ -138,7 +141,7 @@ def test_enlaces_de_google_maps(db):
 
 def test_marcar_paradas_actualiza_el_seguimiento_y_deshacer_lo_restaura(db):
     stop = _stops(1)[0]
-    Visit.objects.create(company=stop.company, status=Visit.Status.RETURN)
+    Visit.objects.create(user=owner(), company=stop.company, status=Visit.Status.RETURN)
 
     services.mark_stop(stop, RouteStop.State.DELIVERED)
     assert Visit.objects.get(company=stop.company).status == Visit.Status.CV_DELIVERED
@@ -217,12 +220,12 @@ def test_ubicacion_fuera_de_barcelona_sale_del_centro_y_avisa(auth_client, db):
 def test_deshacer_no_pisa_un_estado_cambiado_despues(db):
     stop = _stops(1)[0]
     services.mark_stop(stop, RouteStop.State.SKIPPED)
-    tracking.set_status(stop.company, Visit.Status.CV_DELIVERED)  # desde la ficha
+    tracking.set_status(owner(), stop.company, Visit.Status.CV_DELIVERED)  # desde la ficha
     services.mark_stop(stop, RouteStop.State.PENDING)
     assert Visit.objects.get(company=stop.company).status == Visit.Status.CV_DELIVERED
 
     services.mark_stop(stop, RouteStop.State.VISITED)
-    tracking.set_status(stop.company, Visit.Status.DISCARDED)  # cambio posterior
+    tracking.set_status(owner(), stop.company, Visit.Status.DISCARDED)  # cambio posterior
     services.mark_stop(stop, RouteStop.State.PENDING)
     assert Visit.objects.get(company=stop.company).status == Visit.Status.DISCARDED
 
@@ -248,7 +251,7 @@ def test_los_campos_de_fecha_usan_formato_iso(auth_client, db):
     assert f'value="{timezone.localdate().isoformat()}"' in html
 
     company = _company("Sol", 41.39, 2.16)
-    Visit.objects.create(company=company, next_action_on=date(2026, 10, 1))
+    Visit.objects.create(user=owner(), company=company, next_action_on=date(2026, 10, 1))
     html = auth_client.get(reverse("ficha", args=[company.pk])).text
     assert 'value="2026-10-01"' in html
 
@@ -259,9 +262,9 @@ def test_una_empresa_lejana_solo_entra_si_compensa(eixample):
         _company(f"Cerca {i}", origin[0] + i * 0.001, origin[1], score=60)
     lejos = _company("Lejos", origin[0] + 0.03, origin[1], score=65)  # ~3,3 km
 
-    stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=6)
+    stops, _ = planner.plan(owner(), TUESDAY, MORNING, eixample, size=6)
     assert lejos.pk not in {c.company.pk for c in stops}  # +3 de encaje no compensa 3 km
 
-    Favorite.objects.create(company=lejos, priority=Favorite.Priority.HIGH)
-    stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=6)
+    Favorite.objects.create(user=owner(), company=lejos, priority=Favorite.Priority.HIGH)
+    stops, _ = planner.plan(owner(), TUESDAY, MORNING, eixample, size=6)
     assert lejos.pk in {c.company.pk for c in stops}  # favorita alta: sí compensa

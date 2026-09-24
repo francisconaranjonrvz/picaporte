@@ -8,8 +8,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.catalog.models import Category
-from apps.companies.models import Company
 from apps.companies.relevance import OPTIONAL_SECTORS, searched_sectors
+from apps.enrichment.models import FitScore
 from apps.enrichment.profile import stale_scores_count
 from apps.jobs.models import JobRun
 from apps.jobs.views import latest
@@ -18,12 +18,14 @@ from apps.llm.client import LLMError
 from .forms import CVUploadForm, ProfileForm
 from .models import MAX_CV_BYTES, CVDocument, Profile
 from .services import (
+    MAX_PARSES_PER_DAY,
     apply_parsed,
     fingerprint_or_none,
     launch_personal_search,
     parse_cv,
     personal_search_needed,
     save_cv,
+    take_parse_quota,
 )
 
 FIELD_LABELS = {
@@ -68,12 +70,10 @@ def _search_context(profile: Profile) -> dict:
     return {
         "search_sectors": Category.objects.filter(slug__in=sectors),
         "optional_sectors": Category.objects.filter(slug__in=OPTIONAL_SECTORS, is_active=True),
-        "personalize_job": latest(JobRun.Kind.PERSONALIZE),
-        "ranking": (
-            Company.objects.filter(is_active=True, enrichment__fit_score__isnull=False)
-            .select_related("enrichment", "category")
-            .order_by("-enrichment__fit_score", "-confidence_score", "pk")[:5]
-        ),
+        "personalize_job": latest(JobRun.Kind.PERSONALIZE, profile.user),
+        "ranking": FitScore.objects.filter(user=profile.user, company__is_active=True)
+        .select_related("company", "company__category")
+        .order_by("-fit_score", "-company__confidence_score", "company_id")[:5],
     }
 
 
@@ -141,6 +141,12 @@ def cv_parse(request):
     if cv is None:
         return _parse_result(request, profile, error="Sube primero tu CV en PDF.")
     overwrite = request.POST.get("overwrite") == "1"
+    if not take_parse_quota(profile):
+        return _parse_result(
+            request,
+            profile,
+            error=f"Has analizado el CV {MAX_PARSES_PER_DAY} veces hoy: vuelve a probar mañana.",
+        )
     try:
         result = parse_cv(cv)
     except LLMError as exc:
@@ -177,7 +183,7 @@ def profile_update(request):
         if need is None:
             messages.success(request, "Perfil guardado.")
             return redirect("perfil")
-        job = launch_personal_search(discover=need == "discover")
+        job = launch_personal_search(request.user, discover=need == "discover")
         if job.status == JobRun.Status.FAILED:
             messages.warning(
                 request, f"Perfil guardado, pero no se pudo lanzar la búsqueda: {job.error}"

@@ -1,5 +1,6 @@
 """Ejecuciones de trabajos pesados (descubrimiento, enriquecimiento...) en GitHub Actions."""
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -22,6 +23,14 @@ class JobRun(models.Model):
         APP = "app", "Desde la app"
 
     kind = models.CharField("tipo", max_length=16, choices=Kind.choices)
+    # Solo en la búsqueda personalizada: de quién es. Descubrir y enriquecer son globales.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="job_runs",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
     status = models.CharField(
         "estado", max_length=16, choices=Status.choices, default=Status.QUEUED
     )

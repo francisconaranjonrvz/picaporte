@@ -1,5 +1,5 @@
 {% load ui %}
-{% with e=company.enrichment v=company.visit %}
+{% with e=company.enrichment s=company.score v=company.visit %}
 <li class="card">
   <div class="flex items-start gap-3">
     <a href="{% url 'ficha' company.pk %}" class="min-w-0 flex-1">
@@ -8,14 +8,14 @@
         {{ company.category.name|default:"Sin categoría" }}{% if company.zone %} · {{ company.zone.name }}{% endif %}
       </p>
     </a>
-    <span class="mt-0.5">{% include "enrichment/_score_badge.html" with compact=True %}</span>
+    <span class="mt-0.5">{% include "enrichment/_score_badge.html" with e=s compact=True %}</span>
     {% include "tracking/_heart.html" with is_favorite=company.favorite %}
   </div>
-  {% if e.summary or e.fit_reason %}
-    <p class="mt-2 line-clamp-2 text-sm text-muted">{% firstof e.fit_reason e.summary %}</p>
+  {% if e.summary or s.fit_reason %}
+    <p class="mt-2 line-clamp-2 text-sm text-muted">{% firstof s.fit_reason e.summary %}</p>
   {% endif %}
   <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-    {% if e.verdict %}<span class="font-semibold text-muted">{{ e.verdict.label }}</span>{% endif %}
+    {% if s.verdict %}<span class="font-semibold text-muted">{{ s.verdict.label }}</span>{% endif %}
     {% if v and v.status != "pendiente" %}<span class="badge {{ v.badge }}">{{ v.get_status_display }}</span>{% endif %}
     <span class="badge {% if company.open_now %}badge-success{% else %}badge-muted{% endif %}">
       {% icon "clock" "size-3.5" %}{% if company.open_now %}Abierto{% else %}Cerrado{% endif %}{% if company.opening.estimated %}*{% endif %}

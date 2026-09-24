@@ -16,6 +16,7 @@ from .models import MAX_CV_BYTES, CVDocument, Profile
 from .schemas import ParsedCV
 
 CV_PROMPT = "cv_parse_v2"
+MAX_PARSES_PER_DAY = 10  # registro abierto: que una cuenta no agote la cuota gratuita de IA
 PDF_MAGIC = b"%PDF-"
 PARSED_FIELDS = (
     "full_name",
@@ -43,6 +44,18 @@ def validate_pdf(filename: str, data: bytes) -> None:
 def save_cv(profile: Profile, filename: str, data: bytes) -> CVDocument:
     validate_pdf(filename, data)
     return CVDocument.from_upload(profile, filename, data)
+
+
+def take_parse_quota(profile: Profile) -> bool:
+    """Cuenta un análisis del CV de hoy; False si ya se han hecho MAX_PARSES_PER_DAY."""
+    today = timezone.localdate()
+    if profile.parses_on != today:
+        profile.parses_on, profile.parses_today = today, 0
+    if profile.parses_today >= MAX_PARSES_PER_DAY:
+        return False
+    profile.parses_today += 1
+    profile.save(update_fields=["parses_on", "parses_today"])
+    return True
 
 
 def parse_cv(cv: CVDocument) -> LLMResult[ParsedCV]:
@@ -101,13 +114,15 @@ def personal_search_needed(profile: Profile, fingerprint_before: str | None) -> 
     puntuar), "score" (mismo sector, perfil distinto: puntuar) o None."""
     if not profile_is_usable(profile):
         return None
-    if sorted(searched_sectors(profile)) != sorted(profile.discovered_sectors):
+    if not set(searched_sectors(profile)) <= set(profile.discovered_sectors):
         return "discover"
     if profile_fingerprint(profile) != fingerprint_before:
         return "score"
     return None
 
 
-def launch_personal_search(*, discover: bool) -> JobRun:
-    """Lanza personalize.yml (o devuelve el que ya esté en marcha)."""
-    return start_from_app(JobRun.Kind.PERSONALIZE, {"discover": "1" if discover else "0"})
+def launch_personal_search(user, *, discover: bool) -> JobRun:
+    """Lanza personalize.yml para este usuario (o devuelve el suyo que ya esté en marcha)."""
+    return start_from_app(
+        JobRun.Kind.PERSONALIZE, {"discover": "1" if discover else "0"}, user=user
+    )
