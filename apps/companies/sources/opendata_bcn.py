@@ -46,20 +46,36 @@ FIELDS = [
     "Data_Revisio",
 ]
 # Actividades del censo (Codi_Activitat_2022) donde hay agencias, estudios y productoras.
+# "Arts gràfiques" (1700700) se dejó de pedir: son imprentas, copisterías y rotulistas.
 ACTIVITY_CODES = {
     "1600400",  # Serveis a les empreses i oficines
-    "1700700",  # Arts gràfiques
 }
 # (patrón sobre el nombre del local, slug). Gana la primera. Los nombres vienen en
 # catalán, castellano o inglés y casi siempre en mayúsculas.
 NAME_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"cowork", re.I), "coworkings"),
     (re.compile(r"publici|advertis", re.I), "publicidad"),
-    (re.compile(r"comunica|\bpress\b|\brrpp\b|relacions p|relaciones p", re.I), "comunicacion"),
+    # Solo singular: "comunicacions/comunicaciones" suele ser una teleco.
+    (
+        re.compile(r"comunicaci[oó]n?\b|\brrpp\b|relacions p|relaciones p|public relations", re.I),
+        "comunicacion",
+    ),
     (re.compile(r"marketing|m[aà]rqueting", re.I), "marketing-digital"),
     (re.compile(r"\bevent", re.I), "eventos"),
-    (re.compile(r"produc(ci[oó]|tora)|\bfilms?\b|audiovisu|v[ií]deo", re.I), "productoras"),
+    (
+        re.compile(
+            r"produc(ci[oó]|tora)|\bfilms?\b|audiovisu|v[ií]deo",
+            re.I,
+        ),
+        "productoras",
+    ),
     (re.compile(r"disse?ny|dise[nñ]o|design|creativ|branding", re.I), "diseno"),
+    # Sectores opcionales (solo se guardan si el perfil los elige; ver relevance.py).
+    (re.compile(r"editorial|edicions|ediciones", re.I), "editoriales"),
+    (re.compile(r"fotograf|photo", re.I), "fotografia"),
+    (
+        re.compile(r"estudi de gravaci|estudio de grabaci|\brecords\b|\bm[uú]sic(a|s)?\b", re.I),
+        "musica",
+    ),
 ]
 
 

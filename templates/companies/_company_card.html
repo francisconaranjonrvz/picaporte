@@ -8,15 +8,14 @@
         {{ company.category.name|default:"Sin categoría" }}{% if company.zone %} · {{ company.zone.name }}{% endif %}
       </p>
     </a>
-    {% if e.fit_score is not None %}
-      <span class="badge {% if e.fit_score >= 70 %}badge-success{% elif e.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} mt-0.5 shrink-0" title="Encaje con tu perfil">{{ e.fit_score }}</span>
-    {% endif %}
+    <span class="mt-0.5">{% include "enrichment/_score_badge.html" with compact=True %}</span>
     {% include "tracking/_heart.html" with is_favorite=company.favorite %}
   </div>
   {% if e.summary or e.fit_reason %}
     <p class="mt-2 line-clamp-2 text-sm text-muted">{% firstof e.fit_reason e.summary %}</p>
   {% endif %}
   <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+    {% if e.verdict %}<span class="font-semibold text-muted">{{ e.verdict.label }}</span>{% endif %}
     {% if v and v.status != "pendiente" %}<span class="badge {{ v.badge }}">{{ v.get_status_display }}</span>{% endif %}
     <span class="badge {% if company.open_now %}badge-success{% else %}badge-muted{% endif %}">
       {% icon "clock" "size-3.5" %}{% if company.open_now %}Abierto{% else %}Cerrado{% endif %}{% if company.opening.estimated %}*{% endif %}

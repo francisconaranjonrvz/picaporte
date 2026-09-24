@@ -121,6 +121,7 @@ def ficha(request, pk):
     opening = opening_for(company.opening_hours)
     enrichment = getattr(company, "enrichment", None)
     context = {
+        "in_route": company.pk in _route_company_ids(),
         "title": company.name,
         "company": company,
         "enrichment": enrichment,
@@ -150,6 +151,7 @@ def mapa_datos(request):
     form = CompanyFilter(request.GET or None)
     results = form.apply(base_queryset().filter(lat__isnull=False, lng__isnull=False))
     points = []
+    in_route = _route_company_ids()
     for company in list(results)[:MAP_LIMIT]:
         enrichment = getattr(company, "enrichment", None)
         visit = getattr(company, "visit", None)
@@ -163,10 +165,19 @@ def mapa_datos(request):
                 "category": company.category.name if company.category else "",
                 "status": visit.get_status_display() if visit else "",
                 "favorite": hasattr(company, "favorite"),
+                "in_route": company.pk in in_route,
                 "url": company_url(company),
             }
         )
     return JsonResponse({"points": points, "truncated": len(points) == MAP_LIMIT})
+
+
+def _route_company_ids() -> set[int]:
+    """Empresas de la ruta en curso (para el botón "Añadir a la ruta")."""
+    from apps.routes.services import current_route  # routes depende de companies
+
+    route = current_route()
+    return set(route.stops.values_list("company_id", flat=True)) if route else set()
 
 
 def company_url(company: Company) -> str:

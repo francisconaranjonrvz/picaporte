@@ -1,0 +1,4 @@
+{# Nota de encaje con su veredicto (ver apps/enrichment/ranking.py). Uso: include con e=enrichment #}
+{% if e.fit_score is not None %}{% with v=e.verdict %}
+<span class="badge badge-{{ v.tone }} shrink-0" title="{{ v.advice }}">{{ e.fit_score }}{% if not compact %} · {{ v.label }}{% endif %}</span>
+{% endwith %}{% endif %}

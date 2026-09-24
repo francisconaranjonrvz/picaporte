@@ -10,9 +10,22 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from .ranking import clamp_breakdown
+
 
 def _truncate(limit: int):
     return BeforeValidator(lambda v: v[:limit] if isinstance(v, str | list) else v)
+
+
+def _points(value) -> int:
+    """Puntos de un criterio: tolera "30", 30.0 o basura (-> 0); el rango lo fija el ranking."""
+    try:
+        return round(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+Points = Annotated[int, BeforeValidator(_points)]
 
 
 def _language(value):
@@ -48,12 +61,31 @@ class ExtractedCompany(BaseModel):
 
 
 class CompanyScore(BaseModel):
+    """Nota por criterios (ver `ranking.DIMENSIONS`); la total la suma el código."""
+
     company_id: int
-    fit_score: int = Field(ge=0, le=100)
+    sector: Points = Field(description="Sector y servicios afines, 0-40")
+    junior: Points = Field(description="Hueco para un perfil junior, 0-20")
+    preferences: Points = Field(description="Preferencias declaradas (sector, zona, tamaño), 0-20")
+    languages: Points = Field(description="Idiomas, 0-10")
+    clarity: Points = Field(description="Claridad de la información disponible, 0-10")
     reason: Sentence = Field(description="Justificación en 1-2 frases, en español")
     hook: Sentence = Field(
         description="Dos frases en primera persona para presentarse en persona en esa empresa"
     )
+
+    @property
+    def breakdown(self) -> dict[str, int]:
+        return clamp_breakdown(
+            {
+                k: getattr(self, k)
+                for k in ("sector", "junior", "preferences", "languages", "clarity")
+            }
+        )
+
+    @property
+    def fit_score(self) -> int:
+        return sum(self.breakdown.values())
 
 
 class ScoreBatch(BaseModel):

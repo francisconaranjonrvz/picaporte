@@ -28,8 +28,11 @@ def trigger(request, kind):
     if kind == JobRun.Kind.ENRICH:
         mode = request.POST.get("mode", "all")
         inputs["mode"] = mode if mode in ENRICH_MODES else "all"
+    elif kind == JobRun.Kind.PERSONALIZE:
+        inputs["discover"] = "0" if request.POST.get("discover") == "0" else "1"
     job = start_from_app(kind, inputs)
-    return render(request, "jobs/_status.html", {"job": job, "kind": kind})
+    # Si otro trabajo lo bloquea, se muestra (y se sondea) ese en lugar del pedido.
+    return render(request, "jobs/_status.html", {"job": job, "kind": job.kind})
 
 
 @require_GET

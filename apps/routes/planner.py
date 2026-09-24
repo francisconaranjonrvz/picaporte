@@ -7,7 +7,10 @@
    o "planificado", y próxima acción programada para ese día.
 3. Se eligen las `size` con más prioridad descontando la distancia al punto de
    salida (una empresa lejana solo entra si compensa el paseo) y se ordenan por
-   cercanía: vecino más cercano y mejora 2-opt (con ≤ 10 paradas es inmediato).
+   cercanía: vecino más cercano y mejora 2-opt (con ≤ 20 paradas, milisegundos).
+
+Luego la ruta se puede editar a mano (añadir desde el mapa o la ficha, quitar,
+reordenar): ver `services`.
 """
 
 from dataclasses import dataclass
@@ -21,7 +24,7 @@ from apps.companies.opening import opening_for
 from apps.tracking.models import Favorite, Visit
 
 BARCELONA_CENTER = (41.3874, 2.1686)  # plaça de Catalunya
-MIN_STOPS, MAX_STOPS, DEFAULT_STOPS = 6, 10, 8
+MIN_STOPS, MAX_STOPS, DEFAULT_STOPS = 3, 20, 8
 DONE_STATUSES = {Visit.Status.CV_DELIVERED, Visit.Status.VISITED, Visit.Status.DISCARDED}
 FAVORITE_BONUS = {
     Favorite.Priority.HIGH: 45,

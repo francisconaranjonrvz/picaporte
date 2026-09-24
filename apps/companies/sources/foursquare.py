@@ -35,7 +35,6 @@ MAX_AGE = timedelta(days=3 * 365)
 
 # (patrón sobre la hoja de la etiqueta, slug de categoría). Gana la primera regla que encaje.
 CATEGORY_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"cowork", re.I), "coworkings"),
     (re.compile(r"advertis", re.I), "publicidad"),
     (
         re.compile(r"public relations|media agency|communications (agency|firm)", re.I),
@@ -48,6 +47,12 @@ CATEGORY_RULES: list[tuple[re.Pattern, str]] = [
         "productoras",
     ),
     (re.compile(r"graphic design|design studio|website designer|web design", re.I), "diseno"),
+    # Sectores opcionales (solo se guardan si el perfil los elige; ver relevance.py).
+    (re.compile(r"radio station|newspaper|magazine|news (agency|service)", re.I), "medios"),
+    (re.compile(r"publish", re.I), "editoriales"),
+    (re.compile(r"photograph", re.I), "fotografia"),
+    (re.compile(r"recording studio|record label|music (label|production)", re.I), "musica"),
+    (re.compile(r"art gallery|museum|arts? cent(er|re)|cultural cent(er|re)", re.I), "cultura"),
 ]
 # Prefiltro en SQL: unión de las reglas (DuckDB usa RE2, sin flags inline salvo (?i)).
 LABEL_REGEX = "(?i)(" + "|".join(p.pattern for p, _ in CATEGORY_RULES) + ")"

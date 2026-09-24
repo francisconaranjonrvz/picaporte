@@ -7,6 +7,9 @@ from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.catalog.models import Category
+from apps.companies.models import Company
+from apps.companies.relevance import OPTIONAL_SECTORS, searched_sectors
 from apps.enrichment.profile import stale_scores_count
 from apps.jobs.models import JobRun
 from apps.jobs.views import latest
@@ -14,7 +17,14 @@ from apps.llm.client import LLMError
 
 from .forms import CVUploadForm, ProfileForm
 from .models import MAX_CV_BYTES, CVDocument, Profile
-from .services import apply_parsed, parse_cv, save_cv
+from .services import (
+    apply_parsed,
+    fingerprint_or_none,
+    launch_personal_search,
+    parse_cv,
+    personal_search_needed,
+    save_cv,
+)
 
 FIELD_LABELS = {
     "full_name": "nombre",
@@ -24,6 +34,7 @@ FIELD_LABELS = {
     "experience": "experiencia",
     "skills": "habilidades",
     "languages": "idiomas",
+    "categories": "sectores",
 }
 
 
@@ -51,6 +62,21 @@ def _form_context(profile: Profile, form: ProfileForm | None = None, **extra):
     }
 
 
+def _search_context(profile: Profile) -> dict:
+    """Tarjeta "Tu búsqueda": sectores que se buscan, estado del trabajo y el top del ranking."""
+    sectors = searched_sectors(profile)
+    return {
+        "search_sectors": Category.objects.filter(slug__in=sectors),
+        "optional_sectors": Category.objects.filter(slug__in=OPTIONAL_SECTORS, is_active=True),
+        "personalize_job": latest(JobRun.Kind.PERSONALIZE),
+        "ranking": (
+            Company.objects.filter(is_active=True, enrichment__fit_score__isnull=False)
+            .select_related("enrichment", "category")
+            .order_by("-enrichment__fit_score", "-confidence_score", "pk")[:5]
+        ),
+    }
+
+
 def perfil(request):
     profile = _profile(request)
     context = {
@@ -59,6 +85,7 @@ def perfil(request):
         "upload_form": CVUploadForm(),
         "max_cv_mb": MAX_CV_BYTES // (1024 * 1024),
         **_form_context(profile),
+        **_search_context(profile),
     }
     return render(request, "profiles/perfil.html", context)
 
@@ -142,10 +169,29 @@ def _parse_result(request, profile: Profile, *, note: str = "", error: str = "")
 @require_POST
 def profile_update(request):
     profile = _profile(request)
+    fingerprint_before = fingerprint_or_none(profile)
     form = ProfileForm(request.POST, instance=profile)
     if form.is_valid():
-        form.save()
-        messages.success(request, "Perfil guardado.")
+        profile = form.save()
+        need = personal_search_needed(profile, fingerprint_before)
+        if need is None:
+            messages.success(request, "Perfil guardado.")
+            return redirect("perfil")
+        job = launch_personal_search(discover=need == "discover")
+        if job.status == JobRun.Status.FAILED:
+            messages.warning(
+                request, f"Perfil guardado, pero no se pudo lanzar la búsqueda: {job.error}"
+            )
+        elif need == "discover":
+            messages.success(
+                request,
+                "Perfil guardado. Buscando empresas de tus sectores y puntuándolas en segundo "
+                "plano: tarda un rato y puedes seguir usando la app.",
+            )
+        else:
+            messages.success(
+                request, "Perfil guardado. Recalculando tu ranking de empresas en segundo plano."
+            )
         return redirect("perfil")
     context = {
         "title": "Perfil",
@@ -153,5 +199,6 @@ def profile_update(request):
         "upload_form": CVUploadForm(),
         "max_cv_mb": MAX_CV_BYTES // (1024 * 1024),
         **_form_context(profile, form),
+        **_search_context(profile),
     }
     return render(request, "profiles/perfil.html", context, status=400)

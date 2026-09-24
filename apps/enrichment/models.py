@@ -108,6 +108,7 @@ class Enrichment(models.Model):
 
     # Puntuación (IA, perfil + empresa)
     fit_score = models.PositiveSmallIntegerField("encaje (0-100)", null=True, blank=True)
+    fit_breakdown = models.JSONField("encaje por criterios", default=dict, blank=True)
     fit_reason = models.TextField("justificación", blank=True)
     hook = models.TextField("gancho para presentarse", blank=True)
     scored_at = models.DateTimeField(null=True, blank=True)
@@ -125,6 +126,18 @@ class Enrichment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.company} · {self.fit_score if self.fit_score is not None else '—'}"
+
+    @property
+    def verdict(self):
+        from .ranking import verdict
+
+        return verdict(self.fit_score)
+
+    @property
+    def breakdown_rows(self) -> list[dict]:
+        from .ranking import breakdown_rows
+
+        return breakdown_rows(self.fit_breakdown)
 
     @property
     def needs_extraction(self) -> bool:

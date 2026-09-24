@@ -1,12 +1,17 @@
 import pytest
 
 from apps.catalog.models import Category, Zone
-from apps.catalog.seeds import CATEGORIES, ZONES
+from apps.catalog.seeds import CATEGORIES, OPTIONAL_CATEGORIES, RETIRED_CATEGORIES, ZONES
+from apps.companies.relevance import ALL_SECTORS
 
 
 @pytest.mark.django_db
 def test_la_migracion_siembra_el_catalogo():
-    assert list(Category.objects.values_list("slug", flat=True)) == [s for s, _ in CATEGORIES]
+    seeded = [s for s, _ in CATEGORIES + OPTIONAL_CATEGORIES]
+    assert list(Category.objects.values_list("slug", flat=True)) == seeded
+    active = set(Category.objects.filter(is_active=True).values_list("slug", flat=True))
+    assert active == set(seeded) - set(RETIRED_CATEGORIES)
+    assert active == ALL_SECTORS  # cada sector activo tiene reglas de búsqueda, y viceversa
     assert list(Zone.objects.values_list("slug", flat=True)) == [s for s, _, _ in ZONES]
 
 

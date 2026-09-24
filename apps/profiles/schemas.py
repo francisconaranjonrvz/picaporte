@@ -1,10 +1,12 @@
 """Esquema Pydantic de la salida del parseo de CV (structured outputs).
 
-Todos los campos son obligatorios a propósito: la API garantiza el JSON
-completo y el modelo devuelve cadenas/listas vacías cuando un dato no está.
+Todos los campos (salvo `sectors`, añadido en v2) son obligatorios a propósito:
+el modelo devuelve cadenas/listas vacías cuando un dato no está.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from apps.companies.relevance import ALL_SECTORS
 
 
 class EducationItem(BaseModel):
@@ -33,3 +35,13 @@ class ParsedCV(BaseModel):
     experience: list[ExperienceItem]
     skills: list[str]
     languages: list[LanguageItem]
+    sectors: list[str] = Field(
+        default_factory=list,
+        description="Slugs de los sectores donde encaja, de la lista del prompt (máx. 6)",
+    )
+
+    @field_validator("sectors")
+    @classmethod
+    def known_sectors(cls, value: list[str]) -> list[str]:
+        """Se ignoran los slugs inventados en vez de invalidar todo el parseo."""
+        return [s for s in dict.fromkeys(value) if s in ALL_SECTORS][:6]

@@ -11,6 +11,18 @@ CATEGORIES = [
     ("coworkings", "Coworkings creativos"),
 ]
 
+# Sectores opcionales (migración 0003): se buscan solo si el perfil los marca.
+OPTIONAL_CATEGORIES = [
+    ("medios", "Medios: prensa, radio y TV"),
+    ("editoriales", "Editoriales"),
+    ("fotografia", "Estudios de fotografía"),
+    ("musica", "Música y sonido"),
+    ("cultura", "Museos, galerías y centros culturales"),
+]
+# Categorías retiradas en 0003: los coworkings no contratan y ninguna fuente sabe
+# distinguir los departamentos de marketing de marcas.
+RETIRED_CATEGORIES = ["coworkings", "marcas"]
+
 # bbox = [lng_min, lat_min, lng_max, lat_max] aproximados; se afinan en la fase 3.
 ZONES = [
     ("poblenou", "22@ / Poblenou", [2.185, 41.390, 2.215, 41.412]),

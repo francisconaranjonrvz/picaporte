@@ -11,6 +11,7 @@ from apps.catalog.models import Category, Zone
 
 from .dedupe import MemoryIndex, confidence_score, find_match, merge_into
 from .models import Company, Source, SourceRecord
+from .relevance import exclusion_reason, searched_sectors
 from .sources import RawCompany, SourceError, get_adapters
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class IngestStats:
     updated: int = 0
     matched_by: Counter = field(default_factory=Counter)
     skipped: int = 0
+    excluded: Counter = field(default_factory=Counter)  # motivo -> descartadas (relevance.py)
     retired: int = 0  # registros de la fuente que ya no aparecen
     error: str = ""
 
@@ -33,6 +35,7 @@ class IngestStats:
             "updated": self.updated,
             "matched_by": dict(self.matched_by),
             "skipped": self.skipped,
+            "excluded": dict(self.excluded),
             "retired": self.retired,
             "error": self.error,
         }
@@ -235,9 +238,22 @@ def ingest(
 
 
 def run_discovery(
-    source_names: list[str] | None = None, *, dry_run: bool = False
+    source_names: list[str] | None = None,
+    *,
+    dry_run: bool = False,
+    sectors: frozenset[str] | None = None,
 ) -> dict[str, IngestStats]:
-    """Ejecuta cada fuente y vuelca sus resultados. Un fallo en una fuente no detiene las demás."""
+    """Ejecuta cada fuente y vuelca sus resultados. Un fallo en una fuente no detiene las demás.
+
+    Solo entra lo relevante (`relevance.exclusion_reason`) de los sectores buscados, que por
+    defecto salen del perfil: lo descartado no se ve, así que `retire_unseen` lo retira.
+    """
+    profile = None
+    if sectors is None:
+        from apps.enrichment.profile import current_profile
+
+        profile = current_profile()
+        sectors = searched_sectors(profile)
     categories = {c.slug: c for c in Category.objects.all()}
     zones = list(Zone.objects.filter(is_active=True))
     ingestor = None if dry_run else Ingestor(categories=categories, zones=zones)
@@ -248,6 +264,9 @@ def run_discovery(
         try:
             for raw in adapter.fetch():
                 stats.fetched += 1
+                if reason := exclusion_reason(raw, sectors):
+                    stats.excluded[reason] += 1
+                    continue
                 if ingestor is None:
                     continue
                 try:
@@ -274,4 +293,26 @@ def run_discovery(
         # (una fuente caída o vacía no debe vaciar la base de datos).
         if not stats.error and stats.fetched:
             stats.retired = ingestor.retire_unseen(adapter.name)
+    if profile is not None and ingestor is not None:
+        # Perfil ya atendido: guardarlo sin cambiar sectores no lanza otra búsqueda.
+        type(profile).objects.filter(pk=profile.pk).update(discovered_sectors=sorted(sectors))
     return results
+
+
+def discovery_summary(results: dict[str, IngestStats]) -> tuple[str, list[str]]:
+    """Resumen legible por fuente y la lista de errores (para el JobRun)."""
+    lines = []
+    for name, s in results.items():
+        if s.error:
+            lines.append(f"{name}: ERROR {s.error}")
+            continue
+        line = f"{name}: {s.fetched} encontradas, {s.created} nuevas, {s.updated} actualizadas"
+        if excluded := sum(s.excluded.values()):
+            line += f", {excluded} descartadas"
+        if s.retired:
+            line += f", {s.retired} retiradas"
+        if s.skipped:
+            line += f", {s.skipped} omitidas por error"
+        lines.append(line)
+    errors = [f"{n}: {s.error}" for n, s in results.items() if s.error]
+    return "\n".join(lines), errors

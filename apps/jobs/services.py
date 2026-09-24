@@ -12,24 +12,36 @@ from .models import JobRun
 WORKFLOWS = {
     JobRun.Kind.DISCOVER: "discover.yml",
     JobRun.Kind.ENRICH: "enrich.yml",
+    JobRun.Kind.PERSONALIZE: "personalize.yml",
 }
 GITHUB_CHECK_INTERVAL = timedelta(seconds=15)
 # discover.yml corta a los 45 min: un job "activo" más viejo que esto murió sin avisar
-# (p. ej. cancelado) y no debe bloquear el botón.
+# (p. ej. cancelado) y no debe bloquear el botón. La búsqueda personalizada encadena
+# descubrimiento y enriquecimiento (personalize.yml corta a los 100 min).
 STALE_AFTER = timedelta(hours=1)
+STALE_AFTER_BY_KIND = {JobRun.Kind.PERSONALIZE: timedelta(hours=2)}
+# Mientras corre la búsqueda personalizada no se lanza otro enriquecimiento: rastrearían
+# las mismas webs a la vez.
+BLOCKED_BY = {JobRun.Kind.ENRICH: (JobRun.Kind.PERSONALIZE,)}
+
+
+def _active(kind: str) -> JobRun | None:
+    job = JobRun.objects.filter(
+        kind=kind, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
+    ).first()
+    if job is not None:
+        job = refresh_from_github(job)
+    return job if job is not None and job.is_active else None
 
 
 def start_from_app(kind: str, inputs: dict[str, str] | None = None) -> JobRun:
     """Crea el JobRun y dispara su workflow; el comando en Actions lo continúa por id.
 
-    Si ya hay uno activo del mismo tipo (y sigue vivo en GitHub), se devuelve ese.
+    Si ya hay uno activo del mismo tipo, o uno que lo bloquea (y sigue vivo en GitHub),
+    se devuelve ese.
     """
-    active = JobRun.objects.filter(
-        kind=kind, status__in=(JobRun.Status.QUEUED, JobRun.Status.RUNNING)
-    ).first()
-    if active is not None:
-        active = refresh_from_github(active)
-        if active.is_active:
+    for other in (kind, *BLOCKED_BY.get(kind, ())):
+        if (active := _active(other)) is not None:
             return active
     job = JobRun.objects.create(kind=kind, trigger=JobRun.Trigger.APP)
     try:
@@ -78,11 +90,13 @@ def trigger_from_env(job_id: int | None) -> str:
 
 def refresh_from_github(job: JobRun) -> JobRun:
     """Si el workflow acabó sin que el comando cerrara el JobRun (p. ej. fallo antes de arrancar)."""
-    if job.is_active and timezone.now() - job.created_at > STALE_AFTER:
+    stale_after = STALE_AFTER_BY_KIND.get(job.kind, STALE_AFTER)
+    if job.is_active and timezone.now() - job.created_at > stale_after:
+        hours = int(stale_after.total_seconds() // 3600)
         job.mark_finished(
             stats={},
             summary="",
-            error="Sin noticias del workflow en más de 1 h: se da por perdido.",
+            error=f"Sin noticias del workflow en más de {hours} h: se da por perdido.",
         )
         return job
     if not job.is_active or not job.github_run_id or not settings.GITHUB_DISPATCH_TOKEN:

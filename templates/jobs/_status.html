@@ -1,10 +1,10 @@
 {% load ui %}
-{# Estado del último trabajo de un tipo (`kind`: discover | enrich). Se sondea cada 10 s mientras está activo. #}
+{# Estado del último trabajo de un tipo (`kind`: discover | enrich | personalize). Se sondea cada 10 s mientras está activo. #}
 <div id="job-status-{{ kind }}"
      {% if job and job.is_active %}hx-get="{% url 'job_status' kind %}" hx-trigger="every 10s" hx-swap="outerHTML"{% endif %}>
   {% if not job %}
     <p class="text-sm text-muted">
-      {% if kind == "enrich" %}Todavía no se ha analizado ninguna web.{% else %}Todavía no se ha buscado ninguna empresa.{% endif %}
+      {% if kind == "enrich" %}Todavía no se ha analizado ninguna web.{% elif kind == "personalize" %}Todavía no se ha hecho ninguna búsqueda con tu perfil.{% else %}Todavía no se ha buscado ninguna empresa.{% endif %}
     </p>
   {% else %}
     <div class="flex items-start gap-3">
@@ -18,9 +18,9 @@
       <div class="min-w-0 flex-1 text-sm">
         <p class="font-semibold">
           {% if job.status == "queued" %}En cola en GitHub Actions…
-          {% elif job.status == "running" %}{% if kind == "enrich" %}Analizando webs y puntuando…{% else %}Buscando empresas…{% endif %}
-          {% elif job.status == "success" %}{% if kind == "enrich" %}Último análisis{% else %}Última búsqueda{% endif %}: {{ job.finished_at|date:"j M H:i" }}
-          {% else %}{% if kind == "enrich" %}El último análisis falló{% else %}La última búsqueda falló{% endif %} ({{ job.finished_at|date:"j M H:i" }}){% endif %}
+          {% elif job.status == "running" %}{% if kind == "enrich" %}Analizando webs y puntuando…{% elif kind == "personalize" %}Buscando empresas para tu perfil y puntuándolas…{% else %}Buscando empresas…{% endif %}
+          {% elif job.status == "success" %}{% if kind == "enrich" %}Último análisis{% elif kind == "personalize" %}Última búsqueda personalizada{% else %}Última búsqueda{% endif %}: {{ job.finished_at|date:"j M H:i" }}
+          {% else %}{% if kind == "enrich" %}El último análisis falló{% elif kind == "personalize" %}La búsqueda personalizada falló{% else %}La última búsqueda falló{% endif %} ({{ job.finished_at|date:"j M H:i" }}){% endif %}
         </p>
         {% if job.summary %}<pre class="mt-1 whitespace-pre-wrap font-sans text-muted">{{ job.summary }}</pre>{% endif %}
         {% if job.error %}<p class="mt-1 text-danger-ink">{{ job.error|truncatechars:300 }}</p>{% endif %}

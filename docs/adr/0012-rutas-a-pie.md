@@ -34,6 +34,11 @@ en navegadores móviles**; sin `origin`, sale de la ubicación actual.
   "Visitada" → visitado, "Cerrada" → volver + nota, "Saltada" → nada) y "Deshacer" restaura el
   estado exacto anterior (`RouteStop.previous_status`).
 
+## Actualización (ADR 0014)
+Las rutas admiten hasta **20 paradas** y se editan a mano: añadir desde el mapa o la ficha,
+quitar, arrastrar para reordenar y "Ordenar por cercanía". Con más de 10 paradas no hay un
+enlace único de Google Maps: se abre por tramos.
+
 ## Consecuencias
 - Rutas instantáneas, deterministas y testeables, a coste 0.
 - Si una empresa sin horario publicado cierra en esa franja, se verá al pasar: "Cerrada" la deja

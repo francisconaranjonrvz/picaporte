@@ -11,6 +11,7 @@ from apps.enrichment import services
 from apps.enrichment.crawler import CrawlError, CrawlResult, Page
 from apps.enrichment.models import MAX_EXTRACTION_ATTEMPTS, CompanyPage, Enrichment
 from apps.enrichment.profile import profile_fingerprint, stale_scores_count
+from apps.enrichment.ranking import DIMENSIONS
 from apps.enrichment.schemas import CompanyScore, ExtractedCompany, ScoreBatch
 from apps.llm.client import LLMError, LLMNotConfigured
 from apps.profiles.models import Profile
@@ -224,10 +225,19 @@ def test_demasiados_errores_seguidos_paran_la_etapa(db, monkeypatch):
     assert "Demasiados errores" in stats.notes[-1]
 
 
+def _points(total: int) -> dict[str, int]:
+    """Reparte una nota total entre los criterios, llenándolos en orden."""
+    points = {}
+    for key, _, maximum in DIMENSIONS:
+        points[key] = min(maximum, total)
+        total -= points[key]
+    return points
+
+
 def _scores(*pairs):
     return ScoreBatch(
         scores=[
-            CompanyScore(company_id=cid, fit_score=score, reason="motivo", hook="Hola, soy Laura.")
+            CompanyScore(company_id=cid, reason="motivo", hook="Hola, soy Laura.", **_points(score))
             for cid, score in pairs
         ]
     )
@@ -257,6 +267,13 @@ def test_puntuacion_por_lotes_e_ids_desconocidos(profile, monkeypatch):
         "Hola, soy Laura.",
         profile_fingerprint(profile),
     )
+    assert ea.fit_breakdown == {
+        "sector": 40,
+        "junior": 20,
+        "preferences": 20,
+        "languages": 0,
+        "clarity": 0,
+    }
     assert eb.fit_score is None  # se reintentará en la próxima ejecución
 
 

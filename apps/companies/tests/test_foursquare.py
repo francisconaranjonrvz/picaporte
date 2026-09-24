@@ -24,7 +24,9 @@ BPS = "Business and Professional Services"
 @pytest.mark.parametrize(
     ("labels", "slug"),
     [
-        ([f"{BPS} > Office > Coworking Space"], "coworkings"),
+        ([f"{BPS} > Office > Coworking Space"], None),  # ya no se buscan
+        (["Arts and Entertainment > Art Gallery"], "cultura"),
+        ([f"{BPS} > Media > Radio Station"], "medios"),
         ([f"{BPS} > Advertising Agency"], "publicidad"),
         ([f"{BPS} > Public Relations Firm"], "comunicacion"),
         ([f"{BPS} > Media Agency"], "comunicacion"),
@@ -152,8 +154,8 @@ def test_adaptador_filtra_bbox_cerradas_y_categorias_sobre_parquet(tmp_path):
         ],
     )
     raws = list(FoursquareAdapter(path=str(path)).fetch())
-    assert sorted(r.external_id for r in raws) == ["abc123", "cowork"]
-    assert {r.category_slug for r in raws} == {"publicidad", "coworkings"}
+    assert sorted(r.external_id for r in raws) == ["abc123"]
+    assert {r.category_slug for r in raws} == {"publicidad"}
 
 
 def test_sin_token_falla_con_mensaje_claro(monkeypatch):

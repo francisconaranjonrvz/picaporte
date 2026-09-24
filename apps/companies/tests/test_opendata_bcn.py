@@ -34,7 +34,6 @@ ROW = {
 @pytest.mark.parametrize(
     ("name", "slug"),
     [
-        ("THE WOOD COWORKING", "coworkings"),
         ("ROAD PUBLICIDAD", "publicidad"),
         ("MAPA COMUNICACIÓ", "comunicacion"),
         ("NOBEL MARKETING", "marketing-digital"),
@@ -43,11 +42,16 @@ ROW = {
         ("BLANC PRODUCCIONS", "productoras"),
         ("ESTUDI DE DISSENY FRANCESC MORET", "diseno"),
         ("TALKING DESIGN STUDIO", "diseno"),
+        ("EDICIONS DEL PERISCOPI", "editoriales"),
+        ("ESTUDI FOTOGRAFIC NOU", "fotografia"),
         # Falsos positivos que las reglas evitan:
         ("ANTO IMPRESSORS", None),  # "press" dentro de impressors
         ("SEGURIDAD PREVENTIVA SP4", None),  # "event" dentro de preventiva
         ("FUJIFILM", None),
         ("GESTORIA PUIG", None),
+        ("THE WOOD COWORKING", None),  # los coworkings ya no se buscan
+        ("DITEC COMUNICACIONES", None),  # plural: suele ser una teleco
+        ("PRESS I CAR BCN", None),
     ],
 )
 def test_categoria_por_nombre(name, slug):
@@ -69,6 +73,7 @@ def test_fila_a_raw():
     "changes",
     [
         {"Codi_Activitat_2022": "1400002"},  # restaurante
+        {"Codi_Activitat_2022": "1700700"},  # arts gràfiques: imprentas y rotulistas
         {"Nom_Local": "SN"},  # sense nom
         {"Nom_Local": "GESTORIA PUIG"},  # sin palabra clave del sector
     ],
@@ -79,11 +84,11 @@ def test_filas_que_no_interesan(changes):
 
 def test_numero_unico_coordenadas_invalidas_y_nombre_en_minusculas():
     raw = row_to_raw(
-        {**ROW, "Num_Policia_Final": "", "Latitud": "n/d", "Nom_Local": "The Wood Coworking"}
+        {**ROW, "Num_Policia_Final": "", "Latitud": "n/d", "Nom_Local": "The Wood Design"}
     )
     assert raw.address == "Brusi, 36"
     assert raw.lat is None
-    assert raw.name == "The Wood Coworking"  # solo se capitaliza lo que viene en mayúsculas
+    assert raw.name == "The Wood Design"  # solo se capitaliza lo que viene en mayúsculas
 
 
 def test_adaptador_con_filas_inyectadas():
@@ -109,7 +114,7 @@ def test_ultima_edicion_en_el_datastore(monkeypatch):
 def test_busqueda_filtra_en_servidor_y_pide_solo_columnas_utiles():
     query = parse_qs(urlsplit(search_url("r2024", 1000)).query)
     assert query["resource_id"] == ["r2024"]
-    assert json.loads(query["filters"][0]) == {"Codi_Activitat_2022": ["1600400", "1700700"]}
+    assert json.loads(query["filters"][0]) == {"Codi_Activitat_2022": ["1600400"]}
     assert query["fields"][0].split(",") == opendata_bcn.FIELDS
     assert (query["limit"], query["offset"]) == (["1000"], ["1000"])
 

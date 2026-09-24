@@ -13,17 +13,7 @@
     {% include "profiles/_profile_form.html" %}
   </div>
 
-  {% if stale_scores %}
-  {% card %}
-    <h2 class="font-bold">Tu perfil ha cambiado</h2>
-    <p class="mt-1 text-sm text-muted">{{ stale_scores }} empresa{{ stale_scores|pluralize }} se puntuó con tu perfil anterior. Recalcular el encaje no vuelve a leer las webs: solo repite la puntuación con la IA (unos minutos en GitHub Actions).</p>
-    <div class="mt-3">{% include "jobs/_status.html" with job=enrich_job kind="enrich" %}</div>
-    <form hx-post="{% url 'job_trigger' 'enrich' %}" hx-target="#job-status-enrich" hx-swap="outerHTML" class="mt-3">
-      {% csrf_token %}<input type="hidden" name="mode" value="score">
-      {% btn type="submit" size="md" cls="w-full" disabled=enrich_job.is_active %}{% icon "sparkles" "size-5" %}Recalcular encaje{% endbtn %}
-    </form>
-  {% endcard %}
-  {% endif %}
+  {% include "profiles/_search_card.html" %}
 
   {% card %}
     <dl class="grid grid-cols-2 gap-y-2 text-sm">

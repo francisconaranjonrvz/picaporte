@@ -4,9 +4,10 @@ Una sola consulta al bbox de Barcelona con todas las etiquetas relevantes
 (filtros exactos, que usan índice); la respuesta se cachea 7 días. Si el
 servidor principal está saturado (429/504) se reintenta tras 30 s y luego
 se prueba un espejo.
-Cobertura verificada en taginfo (sept. 2026): publicidad, diseño, coworking y
-marketing están bien etiquetados; RRPP, eventos y productoras muy poco, así
-que OSM es una fuente parcial que complementan las demás.
+Cobertura verificada en taginfo (sept. 2026): publicidad, diseño y marketing
+están bien etiquetados; RRPP, eventos y productoras muy poco, así que OSM es
+una fuente parcial que complementan las demás. Los coworkings ya no se piden
+(no contratan). Qué se guarda lo decide `apps.companies.relevance`.
 """
 
 import logging
@@ -47,23 +48,40 @@ OFFICE_TO_CATEGORY = {
     "communication_agency": "comunicacion",
     "film_production": "productoras",
     "video_production": "productoras",
-    "coworking": "coworkings",
+    # Sectores opcionales (solo se guardan si el perfil los elige; ver relevance.py).
+    "newspaper": "medios",
+    "news_agency": "medios",
+    "publisher": "editoriales",
+    "photographer": "fotografia",
+    "record_label": "musica",
 }
-CRAFT_TO_CATEGORY = {"graphic_design": "diseno", "design": "diseno", "web_design": "diseno"}
+CRAFT_TO_CATEGORY = {
+    "graphic_design": "diseno",
+    "design": "diseno",
+    "web_design": "diseno",
+    "photographer": "fotografia",
+}
 STUDIO_TO_CATEGORY = {
     "video": "productoras",
     "cinema": "productoras",
     "film": "productoras",
     "television": "productoras",
+    "radio": "medios",
+    "audio": "musica",
+    "recording": "musica",
+    "photography": "fotografia",
 }
+TOURISM_TO_CATEGORY = {"gallery": "cultura", "museum": "cultura"}
+AMENITY_TO_CATEGORY = {"arts_centre": "cultura"}
 
 
 def build_query(bbox: str = BARCELONA_BBOX) -> str:
     """Filtros por valor exacto (usan índice; los regex sobre áreas grandes acaban en 504)."""
     clauses = [f'  nwr["office"="{v}"];' for v in OFFICE_TO_CATEGORY]
     clauses += [f'  nwr["craft"="{v}"];' for v in CRAFT_TO_CATEGORY]
-    clauses.append('  nwr["amenity"="coworking_space"];')
     clauses += [f'  nwr["amenity"="studio"]["studio"="{v}"];' for v in STUDIO_TO_CATEGORY]
+    clauses += [f'  nwr["tourism"="{v}"];' for v in TOURISM_TO_CATEGORY]
+    clauses += [f'  nwr["amenity"="{v}"];' for v in AMENITY_TO_CATEGORY]
     body = "\n".join(clauses)
     return f"[out:json][timeout:180][bbox:{bbox}];\n(\n{body}\n);\nout center;"
 
@@ -76,11 +94,11 @@ def category_for(tags: dict) -> str | None:
         return OFFICE_TO_CATEGORY[tags["office"]]
     if tags.get("craft") in CRAFT_TO_CATEGORY:
         return CRAFT_TO_CATEGORY[tags["craft"]]
-    if tags.get("amenity") == "coworking_space":
-        return "coworkings"
     if tags.get("amenity") == "studio":
         return STUDIO_TO_CATEGORY.get(tags.get("studio", ""))
-    return None
+    if tags.get("amenity") in AMENITY_TO_CATEGORY:
+        return AMENITY_TO_CATEGORY[tags["amenity"]]
+    return TOURISM_TO_CATEGORY.get(tags.get("tourism", ""))
 
 
 def _address(tags: dict) -> str:

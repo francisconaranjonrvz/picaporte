@@ -55,6 +55,9 @@ class Profile(models.Model):
     parsed_at = models.DateTimeField(null=True, blank=True)
     parsed_model = models.CharField(max_length=64, blank=True)
     parsed_prompt_version = models.CharField(max_length=64, blank=True)
+    # Sectores con los que se hizo la última búsqueda de empresas (búsqueda personalizada):
+    # si los del perfil cambian, al guardarlo se vuelve a buscar.
+    discovered_sectors = models.JSONField(default=list, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

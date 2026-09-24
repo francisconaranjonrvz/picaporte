@@ -113,7 +113,11 @@ class ProfileForm(forms.ModelForm):
         queryset=Category.objects.filter(is_active=True),
         required=False,
         widget=ChipSelect,
-        label="Categorías",
+        label="Sectores",
+        help_text=(
+            "Agencias, estudios y productoras se buscan siempre. Medios, editoriales, "
+            "fotografía, música y cultura solo si los marcas. Todos cuentan para tu ranking."
+        ),
     )
     zones = forms.ModelMultipleChoiceField(
         queryset=Zone.objects.filter(is_active=True),

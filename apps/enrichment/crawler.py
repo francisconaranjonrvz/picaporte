@@ -43,10 +43,10 @@ HEADERS = {
 # empleo, no "sobre nosotros") y se elige como mucho una página de cada tipo.
 PAGE_KINDS: dict[str, re.Pattern] = {
     "jobs": re.compile(
-        r"empleo|trabaj|careers?|jobs?|feina|treball|[uú]nete|join|vacantes|ofertas|talent",
+        r"empleo|trabaj|careers?|jobs?\b|feina|treball|[uú]nete|join|vacantes|ofertas|talent",
         re.I,
     ),
-    "team": re.compile(r"equipo|equip|team|people|persones|personas", re.I),
+    "team": re.compile(r"equipo|equip\b|team|people|persones|personas", re.I),
     "contact": re.compile(r"contact|contacte|contacto|contactar", re.I),
     "about": re.compile(
         r"about|sobre|nosotros|quienes|qui-som|quisom|conoce|coneix|who-we-are|agencia|estudi",

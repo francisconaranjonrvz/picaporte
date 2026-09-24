@@ -1,0 +1,38 @@
+{% load ui %}
+{% card %}
+  <h2 class="font-bold">Tu búsqueda</h2>
+  <p class="mt-1 text-sm text-muted">
+    Al guardar el perfil se buscan empresas de estos sectores y se puntúa cuánto encaja cada una contigo (en GitHub Actions; tarda un rato).
+  </p>
+  <ul class="mt-3 flex flex-wrap gap-1.5" aria-label="Sectores que se buscan">
+    {% for sector in search_sectors %}<li class="badge badge-primary">{{ sector.name }}</li>{% endfor %}
+  </ul>
+  {% if stale_scores %}
+    <p class="mt-3 text-sm text-warning-ink">{{ stale_scores }} empresa{{ stale_scores|pluralize }} se puntuó con tu perfil anterior.</p>
+  {% endif %}
+  <div class="mt-3">{% include "jobs/_status.html" with job=personalize_job kind="personalize" %}</div>
+  <form hx-post="{% url 'job_trigger' 'personalize' %}" hx-target="#job-status-personalize" hx-swap="outerHTML" class="mt-3">
+    {% csrf_token %}<input type="hidden" name="discover" value="1">
+    {% btn type="submit" size="md" cls="w-full" disabled=personalize_job.is_active %}{% icon "sparkles" "size-5" %}Buscar y puntuar ahora{% endbtn %}
+  </form>
+
+  {% if ranking %}
+    <h3 class="mt-5 text-sm font-bold">Las que más encajan contigo</h3>
+    <ol class="mt-2 divide-y divide-primary/40">
+      {% for company in ranking %}
+        <li>
+          <a href="{% url 'ficha' company.pk %}" class="flex items-center gap-3 py-2">
+            <span class="w-5 text-right text-sm font-bold text-muted">{{ forloop.counter }}</span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate font-semibold">{{ company.name }}</span>
+              <span class="block truncate text-xs text-muted">{{ company.category.name|default:"Sin categoría" }}</span>
+            </span>
+            {% include "enrichment/_score_badge.html" with e=company.enrichment %}
+          </a>
+        </li>
+      {% endfor %}
+    </ol>
+    {% url "explorar" as explorar_url %}
+    {% btn href=explorar_url variant="ghost" size="md" cls="mt-2 w-full" %}Ver el ranking completo{% endbtn %}
+  {% endif %}
+{% endcard %}

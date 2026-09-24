@@ -1,4 +1,4 @@
-"""Rutas de visita: un día, una zona y una franja, con 6-10 paradas ordenadas."""
+"""Rutas de visita: un día, una zona y una franja, con hasta 20 paradas ordenadas."""
 
 from datetime import time
 

@@ -1,0 +1,11 @@
+{% load ui %}
+{# Botón "Añadir a la ruta" (ficha y popup del mapa). Se sustituye a sí mismo por HTMX. #}
+<form method="post" action="{% url 'ruta_anadir' company.pk %}"
+      hx-post="{% url 'ruta_anadir' company.pk %}" hx-swap="outerHTML" class="route-add">
+  {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+  {% if in_route %}
+    <a href="{% url 'ruta' %}" class="inline-flex items-center gap-1.5 text-sm font-semibold text-success-ink">{% icon "check" "size-4" %}En tu ruta · ver ruta</a>
+  {% else %}
+    <button type="submit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-action-fill">{% icon "route" "size-4" %}Añadir a la ruta</button>
+  {% endif %}
+</form>

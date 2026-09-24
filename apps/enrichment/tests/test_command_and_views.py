@@ -103,10 +103,10 @@ def test_datos_muestra_el_analisis_y_explorar_ordena_por_encaje(auth_client, use
     assert "Solo recalcular el encaje" in resp.text
 
 
-def test_perfil_ofrece_recalcular_si_el_encaje_esta_desactualizado(auth_client, user):
+def test_perfil_avisa_si_el_encaje_esta_desactualizado(auth_client, user):
     Profile.objects.create(user=user, full_name="Laura", skills=["Canva"])
     resp = auth_client.get(reverse("perfil"))
-    assert "Tu perfil ha cambiado" not in resp.text
+    assert "se puntuó con tu perfil anterior" not in resp.text
 
     Enrichment.objects.create(
         company=Company.objects.create(name="Buzz"),
@@ -116,6 +116,5 @@ def test_perfil_ofrece_recalcular_si_el_encaje_esta_desactualizado(auth_client, 
         scored_at="2026-09-20T10:00:00Z",
     )
     resp = auth_client.get(reverse("perfil"))
-    assert "Tu perfil ha cambiado" in resp.text
     assert "1 empresa se puntuó con tu perfil anterior" in resp.text
-    assert 'name="mode" value="score"' in resp.text
+    assert "Buscar y puntuar ahora" in resp.text

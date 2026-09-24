@@ -19,6 +19,7 @@ hosting **0 €**.
 | ✅ Hecha | **5 · UI principal**: Explorar con filtros (encaje, categoría, zona, estado, abierto ahora, catalán, confianza, favoritas) y paginación HTMX, Mapa (Leaflet), ficha con acciones de un toque, Favoritas con prioridad y arrastrar para ordenar, estados, notas y próximas acciones (ADR 0011) |
 | ✅ Hecha | **6 · Ruta**: día, zona y franja → 6-10 empresas abiertas priorizando favoritas y encaje, ordenadas a pie (vecino más cercano + 2-opt), enlace de Google Maps (y por tramos para el navegador móvil) y modo ruta para marcar paradas (ADR 0012) |
 | ✅ Hecha | **7 · Ofertas**: importación del `scan-history.tsv` de career-ops (o CSV/JSON), cruce con las empresas por dominio, nombre o parecido estricto, filtro e insignia "ofertas activas" en Explorar y lista en la ficha (ADR 0013) |
+| ✅ Hecha | **Búsqueda personalizada**: la IA propone sectores desde el CV, guardar el perfil lanza la búsqueda y la puntuación, ranking por criterios con veredicto, limpieza de fuentes (término municipal, imprentas, coworkings, falsos positivos) y rutas de hasta 20 paradas editables (ADR 0014) |
 
 ## Arquitectura
 
@@ -40,7 +41,7 @@ flowchart LR
     subgraph Actions["GitHub Actions"]
         CI["ci.yml\nlint · tests · deploy-check · css"]
         DBW["db.yml\nmigrate · ensure_user"]
-        W["discover.yml (lunes) · enrich.yml (cada noche)\ncron + workflow_dispatch"]
+        W["discover.yml (lunes) · enrich.yml (cada noche)\npersonalize.yml (al guardar el perfil)"]
     end
 
     subgraph Fuentes["Fuentes externas"]
@@ -54,7 +55,7 @@ flowchart LR
     UI -- HTTPS --> DJ
     UI -- estáticos --> CDN
     DJ -- "URL pooled" --> DB
-    DJ -- "workflow_dispatch (Buscar · Analizar · Recalcular)" --> W
+    DJ -- "workflow_dispatch (Buscar · Analizar · Guardar perfil)" --> W
     DBW -- "URL directa" --> DB
     W -- "URL directa" --> DB
     W --> OSM & FSQ & DIR & WEB & LLM
@@ -79,8 +80,9 @@ Las decisiones con contexto y consecuencias están en [`docs/adr/`](docs/adr/):
 | [0005](docs/adr/0005-tailwind-v4-y-paleta-aa.md) | **Tailwind v4** standalone con tokens en CSS; paleta con contraste **AA verificado en tests** |
 | [0006](docs/adr/0006-pwa-minima.md) | PWA mínima: manifest + iconos + service worker solo para el fallback offline |
 | [0007](docs/adr/0007-nada-largo-en-una-request.md) | Nada largo en una request: workers en Actions (`maxDuration` acotado) |
+| [0014](docs/adr/0014-busqueda-personalizada-y-limpieza.md) | **Búsqueda personalizada**: sectores básicos + opcionales del perfil, `personalize.yml` al guardar, filtro de relevancia central (polígono del término municipal, nombres que delatan otra actividad), ranking por 5 criterios sumados por la app y veredicto por bandas |
 | [0013](docs/adr/0013-ofertas-de-career-ops.md) | **Ofertas de career-ops**: importador con detección de formato (TSV de career-ops, CSV, JSON), upsert por URL, cruce dominio → nombre → difuso estricto ignorando portales y ATS, activas = últimos 45 días |
-| [0012](docs/adr/0012-rutas-a-pie.md) | **Rutas a pie** sin APIs de pago: planificador propio (prioridad + vecino más cercano + 2-opt), enlaces `dir/?api=1` con ≤ 9 paradas y tramos de 3 para navegadores móviles; proponer no cambia estados, marcar sí y deshacer restaura |
+| [0012](docs/adr/0012-rutas-a-pie.md) | **Rutas a pie** sin APIs de pago: planificador propio (prioridad + vecino más cercano + 2-opt), hasta 20 paradas editables, enlaces `dir/?api=1` con ≤ 9 paradas y tramos de 3 para navegadores móviles; proponer no cambia estados, marcar sí y deshacer restaura |
 | [0011](docs/adr/0011-ui-principal-y-seguimiento.md) | **UI principal**: un formulario de filtros para lista y mapa, HTMX para parciales y acciones de un toque, horario OSM + horario de oficina estimado para "abierto ahora", Leaflet y SortableJS vendorizados, seguimiento con `Favorite`/`Visit`/`Note` |
 | [0010](docs/adr/0010-enriquecimiento-en-dos-etapas.md) | **Enriquecimiento en dos etapas**: rastreo propio y educado que guarda solo texto; *extracción* (depende de la web) y *puntuación* por lotes (perfil + empresa) con prompts versionados; cambiar el perfil solo repite la puntuación; modelo de volumen `LLM_MODEL_FAST`; cada noche en Actions con presupuesto de tiempo |
 | [0009](docs/adr/0009-fuentes-de-descubrimiento-y-fusion.md) | **Sin Google Places** (tarjeta obligatoria y términos que prohíben guardar datos); fuentes abiertas con adaptadores `SourceAdapter → RawCompany`, caché HTTP en BD, dedupe por dominio/nombre+distancia, `confidence_score` y trabajos en Actions lanzados desde la app |
@@ -95,8 +97,8 @@ apps/accounts/     login/logout, management/commands/ensure_user.py
 apps/catalog/      Category y Zone configurables en BD (sembradas por migración)
 apps/llm/          capa común (caché por hash, LLMCall con tokens y coste) + providers/ (nvidia gratuito, anthropic opcional)
 apps/profiles/     Profile + CVDocument (PDF en bytea), servicios de subida y parseo, formulario móvil
-apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany) · dedupe.py · filters.py · opening.py (horarios) · Explorar, ficha, Mapa, Datos · discover
-apps/enrichment/   Enrichment + CompanyPage · crawler.py (robots, ≤ 5 páginas) · services.py (extracción y puntuación) · profile.py (lo que usa la web) · enrich
+apps/companies/    Company, SourceRecord, FetchCache · sources/ (SourceAdapter → RawCompany) · relevance.py (sectores, término municipal, basura) · dedupe.py · filters.py · opening.py (horarios) · Explorar, ficha, Mapa, Datos · discover
+apps/enrichment/   Enrichment + CompanyPage · crawler.py (robots, ≤ 5 páginas) · services.py (extracción y puntuación) · ranking.py (criterios y veredicto) · profile.py (lo que usa la web) · enrich · personalize
 apps/tracking/     Favorite, Visit, Note · acciones de un toque (HTMX) y pestaña Favoritas
 apps/routes/       Route, RouteStop · planner.py (candidatas, prioridad, orden a pie) · enlaces de Google Maps · modo ruta
 apps/offers/       JobOffer · importers.py (career-ops, CSV, JSON) · cruce con empresas · import_offers
@@ -104,10 +106,10 @@ apps/jobs/         JobRun + cliente de la API de GitHub (dispatch de workflows y
 templates/         base.html · components/ (bottom nav, badge, chip, skeleton, empty state, toast, field, action bar, sprite de iconos)
 assets/tailwind/   input.css + theme.css (fuente del CSS; no se sirve)
 static/            css/app.css (compilado) · fonts/ · vendor/ (Alpine, Leaflet, SortableJS) · icons/
-scripts/           tw.py (Tailwind standalone) · make_icons.py (PNG desde SVG)
-prompts/           prompts versionados (`cv_parse_v1`, `enrich_extract_v1`, `enrich_score_v1`)
+scripts/           tw.py (Tailwind standalone) · make_icons.py (PNG desde SVG) · barcelona_boundary.py (término municipal)
+prompts/           prompts versionados (`cv_parse_v2`, `enrich_extract_v1`, `enrich_score_v2`; los anteriores se conservan)
 docs/adr/          decisiones de arquitectura
-.github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml
+.github/workflows/ ci.yml · db.yml · discover.yml · enrich.yml · personalize.yml
 Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con runserver)
 ```
 
@@ -133,8 +135,24 @@ Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con r
    - **Censo de locales en planta baixa** (Open Data BCN, API DataStore de CKAN): locales a pie
      de calle con dirección y coordenadas; categoría por palabras clave en el nombre.
    - Descartados: Google Places (términos), Clutch, Páginas Amarillas y Sortlist (anti-bot).
-5. Tras una lectura completa de una fuente, lo que ya no aparece se retira; las empresas sin
-   fuentes pasan a inactivas (no se borran).
+5. **Filtro de relevancia** (`relevance.py`, ADR 0014): solo entran los sectores buscados
+   (básicos + opcionales del perfil), dentro del término municipal de Barcelona (polígono de
+   OSM) y sin nombres que delaten otra actividad (imprentas, rótulos, telecos, interiorismo,
+   coworkings). No se piden coworkings ni la actividad "Arts gràfiques" del censo.
+6. Tras una lectura completa de una fuente, lo que ya no aparece (o ya no pasa el filtro) se
+   retira; las empresas sin fuentes pasan a inactivas (no se borran).
+
+### Búsqueda personalizada y ranking
+
+1. Al analizar el CV, la IA propone de 2 a 6 **sectores** (los básicos y medios, editoriales,
+   fotografía, música o cultura). Se editan como chips en el perfil.
+2. **Guardar el perfil** lanza `personalize.yml` cuando hace falta: con sectores nuevos busca
+   empresas, analiza sus webs y puntúa; si solo cambian otros datos, repite la puntuación. La
+   tarjeta **Tu búsqueda** de Perfil muestra los sectores, el estado y las 5 que más encajan.
+3. La puntuación va por **criterios** (sector 40, hueco junior 20, preferencias 20, idiomas 10,
+   información 10), que la app suma, y un **veredicto**: Ve primero (≥ 75), Merece la pena
+   (60-74), Si pasas cerca (40-59), Baja prioridad. Explorar ordena por esa nota y la ficha
+   enseña el desglose.
 
 ### Ofertas (fase 7)
 
@@ -148,12 +166,14 @@ Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con r
 ### Ruta del día (fase 6)
 
 1. En **Ruta** se elige día, franja (mañana, tarde o todo el día), zona y número de paradas
-   (6-10); opcionalmente, salir desde la ubicación actual.
+   (3-20); opcionalmente, salir desde la ubicación actual. Después se puede editar: **añadir**
+   empresas desde el mapa o su ficha (se insertan donde menos alargan el paseo), quitarlas,
+   arrastrar para reordenar u "Ordenar por cercanía".
 2. El planificador toma las empresas abiertas en esa franja y aún no resueltas, las prioriza
    (favoritas, encaje, "volver", próximas acciones de ese día) y ordena las elegidas para ir
    andando (vecino más cercano + 2-opt). Muestra mapa, kilómetros y minutos estimados.
-3. **Abrir en Google Maps** lleva todas las paradas a pie; si se abre en el navegador del móvil
-   (que solo admite 3 intermedias), hay enlaces por tramos.
+3. **Abrir en Google Maps** lleva todas las paradas a pie (hasta 10); con más paradas, o si se
+   abre en el navegador del móvil (que solo admite 3 intermedias), hay enlaces por tramos.
 4. **Modo ruta**: una tarjeta por parada con el gancho para presentarse, "cómo llegar" y marcas
    de un toque (CV entregado, visitada, cerrada, saltar) que actualizan el seguimiento; "Deshacer"
    restaura el estado anterior.
@@ -180,8 +200,9 @@ Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con r
 2. **Extracción** con IA (`prompts/enrich_extract_v1.md` → `ExtractedCompany`): resumen,
    servicios, clientes, tamaño, ¿requiere catalán?, idiomas, página de empleo y señales de
    contratación. Solo se repite si cambian las páginas.
-3. **Puntuación** por lotes de 10 (`prompts/enrich_score_v1.md` → `ScoreBatch`): `fit_score`
-   0-100 con rúbrica, justificación y un gancho de dos frases para presentarse en la puerta.
+3. **Puntuación** por lotes de 10 (`prompts/enrich_score_v2.md` → `ScoreBatch`): cinco
+   criterios que la app suma en `fit_score` 0-100, justificación y un gancho de dos frases
+   para presentarse en la puerta.
    Guarda la huella del perfil: al editar el perfil, Explorar y Perfil ofrecen **Recalcular
    encaje**, que solo repite esta etapa (`mode=score`).
 4. Corre en Actions (`enrich.yml`) cada noche y desde la app; presupuesto de 45 min: lo que no
@@ -196,7 +217,7 @@ Dockerfile, compose.yaml  solo para desarrollo local (Postgres 17 + la app con r
    (`google/gemma-4-31b-it`, API OpenAI-compatible) pidiendo JSON según el esquema
    de `ParsedCV` (Pydantic); si no valida, se pide una corrección. Con `LLM_PROVIDER=anthropic`
    el PDF viaja como documento a Claude Haiku con *structured outputs*. El prompt vive en
-   [`prompts/cv_parse_v1.md`](prompts/cv_parse_v1.md).
+   [`prompts/cv_parse_v2.md`](prompts/cv_parse_v2.md) y también propone sectores.
 3. Cada llamada queda en `LLMCall` con su hash de entrada, tokens y coste: repetir el análisis
    del mismo CV con el mismo prompt no llama a la API.
 4. El resultado rellena solo los campos vacíos del perfil (o todo, si se marca "Sobrescribir");
@@ -342,6 +363,9 @@ llamada); recalcular el `fit_score` al cambiar el perfil no repite ningún fetch
   enriquecimiento completo lleva varias noches y las puntuaciones aparecen poco a poco.
 - Algunas webs prohíben todos los bots en `robots.txt`: se respetan y esas empresas se puntúan
   solo con los datos del directorio.
+- El filtro de basura se basa en palabras del nombre: puede dejar fuera alguna empresa válida o
+  dejar pasar alguna que no lo es (esas puntúan bajo). Desmarcar un sector opcional retira sus
+  empresas en la siguiente búsqueda.
 - Los *preview deployments* de Vercel comparten la base de datos de producción y están
   protegidos por Vercel Authentication.
 

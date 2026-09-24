@@ -11,7 +11,7 @@ yaml = pytest.importorskip("yaml")
 WORKFLOWS = Path(settings.BASE_DIR) / ".github" / "workflows"
 
 
-@pytest.mark.parametrize("name", ["enrich.yml", "discover.yml"])
+@pytest.mark.parametrize("name", ["enrich.yml", "discover.yml", "personalize.yml"])
 def test_los_inputs_no_se_interpolan_en_run(name):
     """`${{ inputs.x }}` en `run:` permite inyectar órdenes; deben ir por `env:`."""
     workflow = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))

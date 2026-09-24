@@ -10,7 +10,7 @@ from apps.profiles.models import CompanySize, Profile, WorkLanguage
 
 from .models import Enrichment
 
-SCORE_PROMPT = "enrich_score_v1"
+SCORE_PROMPT = "enrich_score_v2"
 
 
 def current_profile() -> Profile | None:
@@ -34,7 +34,7 @@ def profile_brief(profile: Profile) -> str:
         "Habilidades: " + ", ".join(profile.skills),
         "Idiomas: "
         + ", ".join(f"{i.get('language')} ({i.get('level')})" for i in profile.languages),
-        "Categorías que le interesan: " + ", ".join(c.name for c in profile.categories.all()),
+        "Sectores que le interesan: " + ", ".join(c.name for c in profile.categories.all()),
         "Zonas preferidas: " + ", ".join(z.name for z in profile.zones.all()),
         "Tamaño de empresa preferido: " + ", ".join(sizes.get(s, s) for s in profile.company_sizes),
         "Idiomas en los que quiere trabajar: "

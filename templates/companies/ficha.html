@@ -17,9 +17,20 @@
   {% card %}
     <div class="flex items-center justify-between gap-3">
       <h2 class="font-bold">Encaje con tu perfil</h2>
-      <span class="badge {% if enrichment.fit_score >= 70 %}badge-success{% elif enrichment.fit_score >= 40 %}badge-warning{% else %}badge-muted{% endif %} text-sm">{{ enrichment.fit_score }}/100</span>
+      {% include "enrichment/_score_badge.html" with e=enrichment %}
     </div>
+    {% if enrichment.verdict %}<p class="mt-1 text-sm font-semibold">{{ enrichment.verdict.advice }}</p>{% endif %}
     {% if enrichment.fit_reason %}<p class="mt-2 text-sm text-muted">{{ enrichment.fit_reason }}</p>{% endif %}
+    {% if enrichment.breakdown_rows %}
+    <dl class="mt-3 space-y-2 text-sm">
+      {% for row in enrichment.breakdown_rows %}
+      <div>
+        <div class="flex justify-between gap-2"><dt class="text-muted">{{ row.label }}</dt><dd class="font-semibold">{{ row.points }}/{{ row.max }}</dd></div>
+        <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-primary/50" aria-hidden="true"><div class="h-full rounded-full bg-action" style="width: {{ row.pct }}%"></div></div>
+      </div>
+      {% endfor %}
+    </dl>
+    {% endif %}
     {% if enrichment.hook %}
     <div class="mt-3 rounded-xl bg-bg p-3" x-data="{ copied: false }">
       <p class="text-xs font-semibold uppercase tracking-wide text-action-fill">Para presentarte</p>
@@ -36,6 +47,7 @@
   {# Estado y seguimiento #}
   {% card %}
     {% include "tracking/_status_panel.html" %}
+    {% if company.lat is not None %}<div class="mt-3">{% include "routes/_add_button.html" %}</div>{% endif %}
     <details class="mt-3 group">
       <summary class="cursor-pointer text-sm font-semibold text-action-fill">Fecha, contacto y próxima acción</summary>
       <div class="mt-3">{% include "tracking/_visit_form.html" %}</div>

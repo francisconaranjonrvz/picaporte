@@ -1,4 +1,4 @@
-"""Ejecuciones de trabajos pesados (descubrimiento, enriquecimiento) en GitHub Actions."""
+"""Ejecuciones de trabajos pesados (descubrimiento, enriquecimiento...) en GitHub Actions."""
 
 from django.db import models
 from django.utils import timezone
@@ -8,6 +8,7 @@ class JobRun(models.Model):
     class Kind(models.TextChoices):
         DISCOVER = "discover", "Descubrimiento"
         ENRICH = "enrich", "Enriquecimiento"
+        PERSONALIZE = "personalize", "Búsqueda personalizada"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"

@@ -1,0 +1,64 @@
+name: Búsqueda personalizada
+
+# Se lanza desde la app al guardar el perfil (o con el botón de Perfil): busca empresas de
+# los sectores del perfil, analiza sus webs y puntúa el encaje de todas.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Id del JobRun creado por la app (vacío si se lanza a mano)"
+        required: false
+        default: ""
+      discover:
+        description: "Buscar empresas nuevas antes de puntuar (1) o solo puntuar (0)"
+        required: false
+        default: "1"
+        type: choice
+        options: ["1", "0"]
+
+run-name: "personalize discover=${{ inputs.discover || '1' }} [job ${{ inputs.job_id || 'manual' }}]"
+
+permissions:
+  contents: read
+
+# Escribe empresas como discover.yml: mismo grupo, nunca dos a la vez contra Neon.
+concurrency:
+  group: neon-prod-db
+  cancel-in-progress: false
+
+jobs:
+  personalize:
+    name: personalize
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    environment: production
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ALLOWED_HOSTS: localhost
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      LLM_TIMEOUT: "150"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev --group worker
+      - name: Buscar y puntuar
+        # Los inputs van por env y se validan: interpolarlos en el script permitiría inyectar órdenes.
+        env:
+          DISCOVER: ${{ inputs.discover || '1' }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          [[ "$DISCOVER" =~ ^[01]$ ]] || { echo "discover no válido" >&2; exit 1; }
+          args=(--max-minutes 45)
+          if [[ "$DISCOVER" == "0" ]]; then
+            args+=(--skip-discover)
+          fi
+          if [[ -n "$JOB_ID" ]]; then
+            [[ "$JOB_ID" =~ ^[0-9]+$ ]] || { echo "job_id no válido" >&2; exit 1; }
+            args+=(--job-id "$JOB_ID")
+          fi
+          uv run python manage.py personalize "${args[@]}"

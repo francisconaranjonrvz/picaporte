@@ -29,8 +29,8 @@
 <div id="map" class="h-[calc(100dvh-15rem)] min-h-80 overflow-hidden rounded-2xl shadow-soft"
      data-url="{% url 'mapa_datos' %}" role="region" aria-label="Mapa de empresas"></div>
 <p class="mt-2 text-xs text-muted">
-  <span class="inline-block size-2.5 rounded-full bg-success-ink align-middle"></span> encaje 70+ ·
-  <span class="inline-block size-2.5 rounded-full bg-warning-ink align-middle"></span> 40-69 ·
+  <span class="inline-block size-2.5 rounded-full bg-success-ink align-middle"></span> encaje 60+ ·
+  <span class="inline-block size-2.5 rounded-full bg-warning-ink align-middle"></span> 40-59 ·
   <span class="inline-block size-2.5 rounded-full bg-action-fill align-middle"></span> sin puntuar o menos · borde grueso = favorita
 </p>
 {% endblock %}
@@ -51,6 +51,10 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
     const layer = L.layerGroup().addTo(map);
+    const addUrl = "{% url 'ruta_anadir' 0 %}";
+    const routeUrl = "{% url 'ruta' %}";
+    // El contenido del popup se crea al abrirlo: htmx tiene que procesar su botón.
+    map.on("popupopen", (e) => htmx.process(e.popup.getElement()));
     const escape = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
     async function load() {
@@ -60,7 +64,7 @@
       const { points, truncated } = await response.json();
       layer.clearLayers();
       for (const p of points) {
-        const fill = p.score >= 70 ? color("success-ink") : p.score >= 40 ? color("warning-ink") : color("action-fill");
+        const fill = p.score >= 60 ? color("success-ink") : p.score >= 40 ? color("warning-ink") : color("action-fill");
         L.circleMarker([p.lat, p.lng], {
           radius: 6, color: p.favorite ? color("danger-ink") : "#fff", weight: p.favorite ? 4 : 2,
           fillColor: fill, fillOpacity: 0.9,
@@ -69,7 +73,10 @@
             `<strong>${escape(p.name)}</strong><br>${escape(p.category)}` +
             (p.score !== null ? ` · encaje ${p.score}` : "") +
             (p.status ? `<br>${escape(p.status)}` : "") +
-            `<br><a href="${p.url}">Ver ficha</a>`
+            `<br><a href="${p.url}">Ver ficha</a>` +
+            (p.in_route
+              ? `<br><a href="${routeUrl}">En tu ruta · ver ruta</a>`
+              : `<br><button type="button" class="font-semibold" hx-post="${addUrl.replace(/0$/, p.id)}" hx-swap="outerHTML">+ Añadir a la ruta</button>`)
           )
           .addTo(layer);
       }

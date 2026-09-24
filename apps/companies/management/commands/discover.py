@@ -10,7 +10,7 @@ y resumen que la app muestra en la pestaña Explorar.
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.companies.services import run_discovery
+from apps.companies.services import discovery_summary, run_discovery
 from apps.companies.sources import ADAPTERS
 from apps.jobs.models import JobRun
 from apps.jobs.services import begin_job
@@ -43,21 +43,8 @@ class Command(BaseCommand):
             raise
 
         stats = {name: s.as_dict() for name, s in results.items()}
-        lines = []
-        for name, s in results.items():
-            if s.error:
-                lines.append(f"{name}: ERROR {s.error}")
-            else:
-                line = (
-                    f"{name}: {s.fetched} encontradas, {s.created} nuevas, {s.updated} actualizadas"
-                )
-                if s.retired:
-                    line += f", {s.retired} retiradas"
-                if s.skipped:
-                    line += f", {s.skipped} omitidas por error"
-                lines.append(line)
-        summary = "\n".join(lines) + (" (dry-run)" if dry_run else "")
-        errors = [f"{n}: {s.error}" for n, s in results.items() if s.error]
+        text, errors = discovery_summary(results)
+        summary = text + (" (dry-run)" if dry_run else "")
         all_failed = errors and len(errors) == len(results)
         job.mark_finished(
             stats=stats, summary=summary, error="\n".join(errors) if all_failed else ""

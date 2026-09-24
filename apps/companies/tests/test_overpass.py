@@ -56,10 +56,13 @@ def test_la_consulta_usa_filtros_exactos_bbox_y_centros():
         ({"craft": "web_design"}, "diseno"),
         ({"office": "event_management"}, "eventos"),
         ({"office": "public_relations"}, "comunicacion"),
-        ({"office": "coworking"}, "coworkings"),
-        ({"amenity": "coworking_space"}, "coworkings"),
+        ({"office": "coworking"}, None),  # los coworkings ya no se buscan
+        ({"amenity": "coworking_space"}, None),
+        ({"office": "newspaper"}, "medios"),
+        ({"tourism": "gallery"}, "cultura"),
+        ({"craft": "photographer"}, "fotografia"),
         ({"amenity": "studio", "studio": "television"}, "productoras"),
-        ({"amenity": "studio", "studio": "radio"}, None),
+        ({"amenity": "studio", "studio": "radio"}, "medios"),
         ({"office": "telecommunication"}, None),
     ],
 )

@@ -2,6 +2,7 @@ import pytest
 
 from django.urls import reverse
 
+from apps.catalog.models import Category
 from apps.llm.client import LLMError, LLMResult
 from apps.llm.models import LLMCall
 from apps.profiles import services, views
@@ -25,6 +26,7 @@ PARSED = ParsedCV(
     ],
     skills=["Canva", "Meta Ads"],
     languages=[LanguageItem(language="Catalán", level="nativo")],
+    sectors=["eventos", "comunicacion", "inventado", "eventos"],
 )
 
 
@@ -34,7 +36,7 @@ def _result(profile, cached=False):
         defaults={
             "purpose": "cv_parse",
             "model": "claude-haiku-4-5",
-            "prompt_version": "cv_parse_v1",
+            "prompt_version": "cv_parse_v2",
             "response": PARSED.model_dump(),
         },
     )
@@ -56,24 +58,30 @@ def test_apply_parsed_rellena_campos_vacios_y_marca_trazabilidad(user):
         "experience",
         "skills",
         "languages",
+        "categories",
     }
+    # Sectores propuestos por la IA: sin inventados ni repetidos.
+    assert set(profile.categories.values_list("slug", flat=True)) == {"eventos", "comunicacion"}
     assert profile.full_name == "Laura Vidal"
     assert profile.skills == ["Canva", "Meta Ads"]
     assert profile.education[0]["organization"] == "UAB"
     assert profile.parsed_model == "claude-haiku-4-5"
-    assert profile.parsed_prompt_version == "cv_parse_v1"
+    assert profile.parsed_prompt_version == "cv_parse_v2"
     assert profile.parsed_at is not None
 
 
 @pytest.mark.django_db
 def test_apply_parsed_respeta_lo_editado_a_mano_salvo_overwrite(user):
     profile = Profile.objects.create(user=user, full_name="Laura V.", skills=["Excel"])
+    profile.categories.set(Category.objects.filter(slug="diseno"))
 
     changed = apply_parsed(profile, _result(profile))
     assert "full_name" not in changed
     assert "skills" not in changed
     assert "summary" in changed
     assert profile.full_name == "Laura V."
+
+    assert "categories" not in changed  # ya tenía sectores elegidos a mano
 
     changed = apply_parsed(profile, _result(profile), overwrite=True)
     assert "full_name" in changed
@@ -141,7 +149,7 @@ def test_parse_cv_usa_el_prompt_versionado_y_el_pdf(user, monkeypatch):
 
     services.parse_cv(cv)
 
-    assert captured["prompt_version"] == "cv_parse_v1"
+    assert captured["prompt_version"] == "cv_parse_v2"
     assert captured["pdf_bytes"] == PDF
     assert captured["output_model"] is ParsedCV
     assert "nunca inventes" in captured["system"]

@@ -83,11 +83,11 @@ def test_orden_por_cercania_mejora_el_recorrido(db):
 
 
 def test_plan_limita_paradas_y_elige_las_prioritarias(eixample):
-    for i in range(14):
-        _company(f"E{i:02d}", 41.385 + i * 0.001, 2.16, score=40 + i)
+    for i in range(24):
+        _company(f"E{i:02d}", 41.385 + i * 0.0005, 2.16, score=40 + i)
     stops, origin = planner.plan(TUESDAY, MORNING, eixample, size=25)
-    assert len(stops) == planner.MAX_STOPS  # 25 se recorta a 10
-    assert {c.company.name for c in stops} == {f"E{i:02d}" for i in range(4, 14)}
+    assert len(stops) == planner.MAX_STOPS == 20  # 25 se recorta a 20
+    assert {c.company.name for c in stops} == {f"E{i:02d}" for i in range(4, 24)}
     assert origin == planner.zone_center(eixample)
     stops, _ = planner.plan(TUESDAY, MORNING, eixample, size=1)
     assert len(stops) == planner.MIN_STOPS
@@ -197,7 +197,7 @@ def test_formulario_invalido_y_sin_candidatas(auth_client, eixample):
         reverse("ruta_crear"), {"date": "2026-09-27", "slot": "manana", "size": 6}
     )  # domingo: nada abierto
     assert resp.status_code == 302
-    assert "No hay empresas para esa franja" in auth_client.get(reverse("ruta")).text
+    assert "La ruta está vacía" in auth_client.get(reverse("ruta")).text
 
 
 def test_ubicacion_fuera_de_barcelona_sale_del_centro_y_avisa(auth_client, db):

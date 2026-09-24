@@ -408,6 +408,7 @@ def apply_scores(enrichments: list[Enrichment], result, fingerprint: str) -> int
         if enrichment is None:  # id inventado o repetido
             continue
         enrichment.fit_score = score.fit_score
+        enrichment.fit_breakdown = score.breakdown
         enrichment.fit_reason = score.reason
         enrichment.hook = score.hook
         enrichment.scored_at = now
@@ -420,6 +421,7 @@ def apply_scores(enrichments: list[Enrichment], result, fingerprint: str) -> int
         updated,
         [
             "fit_score",
+            "fit_breakdown",
             "fit_reason",
             "hook",
             "scored_at",
