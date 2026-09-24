@@ -58,8 +58,9 @@ def test_primer_guardado_busca_y_puntua(auth_client, dispatched):
     resp = _post(auth_client)
 
     assert "Buscando empresas de tus sectores" in resp.text
-    assert dispatched == [("personalize.yml", {"job_id": "1", "discover": "1"})]
-    assert JobRun.objects.get().kind == JobRun.Kind.PERSONALIZE
+    job = JobRun.objects.get()
+    assert job.kind == JobRun.Kind.PERSONALIZE
+    assert dispatched == [("personalize.yml", {"job_id": str(job.pk), "discover": "1"})]
 
 
 def test_sin_cambios_no_relanza_y_con_cambios_decide_que_rehacer(auth_client, user, dispatched):
