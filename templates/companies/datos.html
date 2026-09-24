@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load ui %}
 {% block content %}
-<header class="mb-4 flex items-center gap-3">
+<header class="mb-4 flex items-center gap-3" data-reload-on-job-finished>
   <a href="{% url 'explorar' %}" class="flex size-11 items-center justify-center rounded-full bg-surface shadow-soft" aria-label="Volver a Explorar">{% icon "arrow-left" "size-5" %}</a>
   <div>
     <h1 class="text-2xl font-extrabold tracking-tight">Datos</h1>

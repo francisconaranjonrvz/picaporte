@@ -1,0 +1,4 @@
+{# Enlace "Quitar filtros" (oculto sin filtros activos); con `oob` se actualiza al filtrar por HTMX. #}
+<div id="filters-reset" class="col-span-2"{% if not form.active_count %} hidden{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>
+  <a href="{% url 'explorar' %}" class="block py-2 text-center text-sm font-semibold text-action-fill">Quitar filtros</a>
+</div>

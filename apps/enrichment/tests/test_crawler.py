@@ -7,6 +7,7 @@ from apps.enrichment.crawler import (
     Crawler,
     CrawlError,
     find_emails,
+    find_socials,
     html_to_text,
     normalize_start_url,
     pick_links,
@@ -199,3 +200,137 @@ def test_enlaces_que_acaban_en_la_misma_pagina_no_se_repiten():
     urls = [p.url for p in result.pages]
     assert len(urls) == len(set(urls))
     assert "about" not in [p.kind for p in result.pages]
+
+
+def test_sin_red_ni_para_robots_es_unreachable_no_robots():
+    def handler(request):
+        raise httpx.ConnectError("dominio inexistente")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(CrawlError) as exc:
+        Crawler(client=client, sleep=lambda s: None).crawl("buzz.es")
+    assert exc.value.status == "unreachable"
+    assert "ConnectError" in str(exc.value)
+
+
+def test_quita_los_nul_que_postgres_no_admite():
+    html = (
+        '<html lang="es\x00"><body><p>Hola\x00mundo</p>'
+        '<a href="https://instagram.com/ag\x00">IG</a>'
+        '<a href="mailto:hola\x00@buzz.es">m</a></body></html>'
+    )
+    text, lang, soup = html_to_text(html)
+    assert "\x00" not in text
+    assert lang == "es"
+    assert find_socials(soup, "https://buzz.es/") == {"instagram": "https://instagram.com/ag"}
+    assert find_emails(text, soup) == ["hola@buzz.es"]
+
+
+def test_un_enlace_mal_formado_no_aborta_el_rastreo():
+    home = HOME.replace(
+        "</nav>",
+        '<a href="http://[tu-dominio]/empleo">Empleo</a>'
+        '<a href="https://[instagram]/x">IG</a></nav>',
+    )
+    routes = _site({"https://buzz.es/": (200, home, "text/html")})
+    result = Crawler(client=_client(routes), sleep=lambda s: None).crawl("buzz.es")
+    assert result.pages[0].kind == "home"
+    assert result.socials["instagram"] == "https://www.instagram.com/buzz"
+
+
+def test_redes_sociales_solo_con_enlaces_http():
+    _, _, soup = html_to_text(
+        '<a href="javascript://instagram.com/%0Aalert(1)">x</a>'
+        '<a href="//www.linkedin.com/company/buzz?trk=1">in</a>'
+    )
+    assert find_socials(soup, "https://buzz.es/") == {
+        "linkedin": "https://www.linkedin.com/company/buzz"
+    }
+
+
+def test_subpagina_que_redirige_a_otro_dominio_no_se_guarda():
+    routes = _site()
+
+    def handler(request):
+        url = str(request.url)
+        if url == "https://buzz.es/es/talent":
+            return httpx.Response(
+                301, headers={"location": "https://www.linkedin.com/company/buzz/jobs"}
+            )
+        if request.url.host.endswith("linkedin.com"):
+            return httpx.Response(
+                200,
+                text="<p>Inicia sesión</p><p>soporte@linkedin.com</p>",
+                headers={"content-type": "text/html"},
+            )
+        status, body, ctype = routes.get(url, (404, "", "text/html"))
+        return httpx.Response(status, text=body, headers={"content-type": ctype})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    result = Crawler(client=client, sleep=lambda s: None).crawl("https://buzz.es")
+    assert "jobs" not in [p.kind for p in result.pages]
+    assert all("linkedin" not in p.url for p in result.pages)
+    assert "soporte@linkedin.com" not in result.emails
+
+
+def test_el_charset_de_la_cabecera_manda_sobre_el_meta():
+    body = '<html><head><meta charset="iso-8859-1"></head><body><p>Diseño</p></body></html>'
+    routes = {
+        "https://buzz.es/robots.txt": (404, "", "text/plain"),
+        "https://buzz.es/": (200, body, "text/html; charset=UTF-8"),
+    }
+    result = Crawler(client=_client(routes), sleep=lambda s: None).crawl("buzz.es")
+    assert result.pages[0].text == "Diseño"
+
+
+def test_el_corte_no_parte_un_caracter_utf8(monkeypatch):
+    head = '<html><head><meta charset="utf-8"><title>Diseño y comunicación</title></head><body>'
+    body = (head + "<p>x</p>" * 50 + "<p>ñññ</p></body></html>").encode("utf-8")
+    cut = body.index("ñññ".encode()) + 1  # a mitad de la primera "ñ" del final
+    monkeypatch.setattr(crawler, "MAX_BYTES", cut)
+
+    def handler(request):
+        return httpx.Response(200, content=body, headers={"content-type": "text/html"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    fetched = Crawler(client=client, sleep=lambda s: None).get("https://buzz.es/")
+    assert len(fetched.content) == cut - 1
+    text, _, _ = html_to_text(fetched.markup)
+    assert "Diseño y comunicación" in text
+
+
+def test_una_descarga_con_cuentagotas_se_corta_por_tiempo_total():
+    now = [0.0]
+
+    def drip():
+        for _ in range(1000):
+            now[0] += 5.0  # un byte cada 5 s: el timeout entre lecturas no salta nunca
+            yield b"x"
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(200, content=drip(), headers={"content-type": "text/html"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(CrawlError) as exc:
+        Crawler(client=client, sleep=lambda s: None, clock=lambda: now[0]).crawl("buzz.es")
+    assert exc.value.status == "unreachable"
+    assert now[0] <= crawler.MAX_SECONDS + 10
+
+
+def test_robots_txt_con_cuentagotas_tambien_se_corta():
+    now = [0.0]
+
+    def drip():
+        for _ in range(1000):
+            now[0] += 5.0
+            yield b"#"
+
+    def handler(request):
+        return httpx.Response(200, content=drip(), headers={"content-type": "text/plain"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(CrawlError) as exc:
+        Crawler(client=client, sleep=lambda s: None, clock=lambda: now[0]).crawl("buzz.es")
+    assert exc.value.status == "unreachable"

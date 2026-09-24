@@ -56,9 +56,17 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --no-dev --group worker
       - name: Enriquecer empresas
-        run: >-
-          uv run python manage.py enrich
-          --mode ${{ inputs.mode || 'all' }}
-          --limit ${{ inputs.limit || '150' }}
-          --max-minutes 45
-          ${{ inputs.job_id && format('--job-id {0}', inputs.job_id) || '' }}
+        # Los inputs van por env y se validan: interpolarlos en el script permitiría inyectar órdenes.
+        env:
+          MODE: ${{ inputs.mode || 'all' }}
+          LIMIT: ${{ inputs.limit || '150' }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          [[ "$MODE" =~ ^(all|score)$ ]] || { echo "mode no válido" >&2; exit 1; }
+          [[ "$LIMIT" =~ ^[0-9]+$ ]] || { echo "limit no válido" >&2; exit 1; }
+          args=(--mode "$MODE" --limit "$LIMIT" --max-minutes 45)
+          if [[ -n "$JOB_ID" ]]; then
+            [[ "$JOB_ID" =~ ^[0-9]+$ ]] || { echo "job_id no válido" >&2; exit 1; }
+            args+=(--job-id "$JOB_ID")
+          fi
+          uv run python manage.py enrich "${args[@]}"

@@ -1,3 +1,5 @@
+import json
+
 from django.http import Http404
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
@@ -32,9 +34,17 @@ def trigger(request, kind):
 
 @require_GET
 def status(request, kind):
-    """Parcial de estado; HTMX lo sondea cada 10 s mientras el trabajo está activo."""
+    """Parcial de estado; HTMX lo sondea cada 10 s mientras el trabajo está activo.
+
+    Cuando el trabajo termina se emite el evento `job-finished`: los botones para lanzar
+    trabajos (fuera del parcial) se pintaron deshabilitados. base.html los reactiva, y las
+    páginas cuyas cifras cambian (Datos) se recargan; Perfil no, para no perder lo escrito.
+    """
     kind = _kind(kind)
     job = latest(kind)
     if job is not None:
         job = refresh_from_github(job)
-    return render(request, "jobs/_status.html", {"job": job, "kind": kind})
+    response = render(request, "jobs/_status.html", {"job": job, "kind": kind})
+    if request.htmx and (job is None or not job.is_active):
+        response["HX-Trigger"] = json.dumps({"job-finished": kind})
+    return response

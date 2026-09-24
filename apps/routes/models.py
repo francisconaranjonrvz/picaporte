@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.catalog.models import Zone
 from apps.companies.models import Company
+from apps.tracking.models import Note
 
 
 class Route(models.Model):
@@ -59,6 +60,10 @@ class RouteStop(models.Model):
     distance_m = models.PositiveIntegerField("distancia desde la parada anterior (m)", default=0)
     # Estado de seguimiento de la empresa antes de marcar la parada, para poder deshacer.
     previous_status = models.CharField(max_length=16, blank=True)
+    # Nota "Cerrada al pasar…" que dejó la marca, para borrarla al deshacer.
+    closed_note = models.ForeignKey(
+        Note, null=True, blank=True, related_name="+", on_delete=models.SET_NULL
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

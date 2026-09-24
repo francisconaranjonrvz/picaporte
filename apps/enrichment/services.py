@@ -187,6 +187,7 @@ def save_crawl(enrichment: Enrichment, outcome: CrawlResult | Exception) -> None
         )
         enrichment.crawl_status = Enrichment.CrawlStatus.OK
         enrichment.crawl_error = ""
+        enrichment.extraction_attempts = 0  # tras cada rastreo, la extracción vuelve a probar
         enrichment.pages_hash = pages_hash(outcome.pages)
         enrichment.emails = outcome.emails
         enrichment.socials = outcome.socials
@@ -213,9 +214,20 @@ def crawl(enrichments: list[Enrichment], stats: EnrichStats, deadline: Deadline,
             try:
                 save_crawl(enrichment, outcome)
             except DatabaseError as exc:
-                # Un dato raro de una web no debe tumbar el lote entero.
+                # Un dato raro de una web no debe tumbar el lote entero. La instancia ya lleva
+                # los datos que han fallado: se guarda solo el error, con un UPDATE aparte.
                 logger.warning("No se pudo guardar el rastreo de %s: %s", enrichment.company, exc)
-                save_crawl(enrichment, CrawlError("unreachable", f"Error al guardar: {exc}"))
+                fields = {
+                    "crawl_status": Enrichment.CrawlStatus.UNREACHABLE,
+                    "crawl_error": f"Error al guardar: {exc}"[:300],
+                    "crawled_at": timezone.now(),
+                }
+                for name, value in fields.items():
+                    setattr(enrichment, name, value)
+                try:
+                    Enrichment.objects.filter(pk=enrichment.pk).update(**fields)
+                except DatabaseError:
+                    logger.exception("Tampoco se pudo guardar el error de %s", enrichment.company)
             stats.crawled += 1
             stats.crawl_status[enrichment.crawl_status] += 1
 
@@ -269,6 +281,7 @@ def apply_extraction(enrichment: Enrichment, result, page_urls: set[str]) -> Non
     enrichment.extracted_pages_hash = enrichment.pages_hash
     enrichment.extraction_model = result.call.model
     enrichment.extraction_prompt_version = result.call.prompt_version
+    enrichment.extraction_attempts = 0
     enrichment.error = ""
     enrichment.save()
 
@@ -305,7 +318,10 @@ def extract(stats: EnrichStats, deadline: Deadline, workers: int, limit: int | N
                 consecutive_errors += 1
                 stats.llm_errors += 1
                 message = str(outcome) if isinstance(outcome, LLMError) else repr(outcome)
-                Enrichment.objects.filter(pk=enrichment.pk).update(error=message[:300])
+                # Tras MAX_EXTRACTION_ATTEMPTS fallos deja de reintentarse y se puntúa sin ella.
+                Enrichment.objects.filter(pk=enrichment.pk).update(
+                    error=message[:300], extraction_attempts=F("extraction_attempts") + 1
+                )
                 logger.warning("Extracción de %s fallida: %s", enrichment.company, message)
                 continue
             consecutive_errors = 0
@@ -349,7 +365,8 @@ def company_card(enrichment: Enrichment) -> dict:
 def select_for_scoring(fingerprint: str) -> list[Enrichment]:
     """Sin puntuar, puntuadas con otro perfil o con datos extraídos más nuevos que la nota.
 
-    Las webs rastreadas pero aún sin analizar esperan a la extracción.
+    Las webs rastreadas pero aún sin analizar esperan a la extracción (salvo que esta
+    haya fallado ya `MAX_EXTRACTION_ATTEMPTS` veces: ver `Enrichment.needs_extraction`).
     """
     qs = (
         Enrichment.objects.select_related("company", "company__category", "company__zone")
@@ -445,8 +462,17 @@ def score(profile: Profile | None, stats: EnrichStats, deadline: Deadline, worke
                 stats.llm_errors += 1
                 logger.warning("Puntuación de un lote fallida: %s", outcome)
                 continue
+            applied = apply_scores(enrichments, outcome, fingerprint)
+            if not applied:
+                # Ningún id del lote: si se quedara en la caché, el mismo lote recibiría la
+                # misma respuesta inútil cada noche. Se borra y cuenta como error.
+                outcome.call.delete()
+                consecutive_errors += 1
+                stats.llm_errors += 1
+                logger.warning("Lote de puntuación sin ningún id válido; se reintentará")
+                continue
             consecutive_errors = 0
-            stats.scored += apply_scores(enrichments, outcome, fingerprint)
+            stats.scored += applied
         if consecutive_errors >= MAX_CONSECUTIVE_LLM_ERRORS:
             stats.notes.append(
                 "Demasiados errores seguidos de la IA; se reintentará en la próxima ejecución."

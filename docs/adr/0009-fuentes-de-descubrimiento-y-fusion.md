@@ -84,3 +84,20 @@ Verificado contra documentación viva en septiembre de 2026:
   aparecen se borran; una empresa sin ninguna fuente pasa a inactiva (no se borra: puede tener
   favoritos o visitas) y vuelve a activarse si reaparece. Una fuente caída o vacía no retira nada.
 - `apps.companies.http.robots_allows()` queda para la fase 4 (visitar webs de empresas).
+
+## Actualización · revisión (2026-09-24)
+
+Una revisión adversarial (un agente propone el fallo y otro intenta refutarlo y reproducirlo)
+confirmó 41 defectos en las fases 3-7. En el descubrimiento:
+- **El dominio solo fusiona a menos de 500 m** (`DOMAIN_MAX_DISTANCE_M`): antes se fundían todas
+  las sedes de una cadena. La migración `0004_unmerge_chain_records` suelta las ya fundidas y el
+  siguiente descubrimiento las recrea por separado.
+- **Hosts compartidos** (facebook.com, instagram.com, linktr.ee, wixsite…) no cuentan como dominio.
+- **Webs normalizadas** (`normalize_website`): solo http(s); `javascript:` se descarta (XSS
+  almacenado desde OSM). La migración `0003` limpia las ya guardadas.
+- **Nombres solo genéricos** ("Events", "Coworking Barcelona") no fusionan por nombre.
+- La retirada recalcula las fuentes vivas de cada empresa (antes desactivaba empresas con otro
+  registro vivo de la misma fuente) y libera los campos de la fuente retirada.
+- Un registro anómalo se omite y se cuenta, sin abortar el descubrimiento; los campos se recortan
+  a su longitud. Un `remark` de error de Overpass es un fallo (nada se retira ni se cachea).
+- Las ediciones del admin se marcan como `manual` y el descubrimiento no las pisa.

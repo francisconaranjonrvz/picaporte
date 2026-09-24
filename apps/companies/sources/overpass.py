@@ -14,7 +14,7 @@ import time
 from collections.abc import Iterable
 from datetime import timedelta
 
-from ..http import FetchError, fetch
+from ..http import Fetched, FetchError, fetch, forget
 from ..models import Source
 from .base import RawCompany, SourceError
 
@@ -121,7 +121,7 @@ class OverpassAdapter:
         self.url = url
         self.ttl = ttl
 
-    def _request(self):
+    def _request(self) -> tuple[str, Fetched]:
         """Varios intentos en el principal con pausas crecientes; si sigue saturado, los espejos.
 
         Desde los runners de GitHub (IPs compartidas) los 504 son frecuentes; el cron
@@ -138,7 +138,7 @@ class OverpassAdapter:
                 last_error = str(exc)
                 continue
             if response.status_code == 200:
-                return response
+                return url, response
             if response.status_code == 406:
                 raise SourceError("Overpass ha bloqueado el User-Agent (406).")
             last_error = f"Overpass {url} respondió {response.status_code}"
@@ -149,11 +149,20 @@ class OverpassAdapter:
         raise SourceError(f"Overpass saturado o caído: {last_error}")
 
     def fetch(self) -> Iterable[RawCompany]:
-        response = self._request()
+        url, response = self._request()
         try:
-            elements = response.json().get("elements", [])
+            body = response.json()
         except ValueError as exc:
             raise SourceError("Overpass devolvió una respuesta que no es JSON.") from exc
+        if not isinstance(body, dict):
+            raise SourceError("Overpass devolvió un JSON inesperado.")
+        # Timeout o falta de memoria en el servidor llegan con 200, un 'remark' y los
+        # elementos truncados: tomarlos por completos retiraría empresas que siguen ahí.
+        remark = str(body.get("remark") or "")
+        if "error" in remark.lower():
+            forget(url, method="POST", data={"data": QUERY})  # que no se reutilice 7 días
+            raise SourceError(f"Overpass incompleto: {remark}")
+        elements = body.get("elements", [])
         logger.info(
             "Overpass: %d elementos (%s)", len(elements), "caché" if response.cached else "red"
         )

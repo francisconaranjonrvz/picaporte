@@ -48,3 +48,12 @@ def test_icon_usa_el_sprite():
     assert html == (
         '<svg class="size-6" aria-hidden="true" focusable="false"><use href="#i-heart"></use></svg>'
     )
+
+
+def test_http_url_solo_deja_pasar_http_y_https():
+    source = "[{{ url|http_url }}]"
+    assert render(source, url="https://sol.com") == "[https://sol.com]"
+    assert render(source, url="Http://sol.com") == "[Http://sol.com]"
+    assert render(source, url="www.sol.com") == "[]"
+    assert render(source, url="javascript:alert(1)") == "[]"
+    assert render(source, url=None) == "[]"

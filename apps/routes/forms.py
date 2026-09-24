@@ -43,6 +43,17 @@ class RouteForm(forms.Form):
         kwargs.setdefault("initial", {"date": timezone.localdate(), "size": DEFAULT_STOPS})
         super().__init__(*args, **kwargs)
         self.fields["zone"].queryset = Zone.objects.filter(is_active=True)
+        self.location_ignored = False
+
+    def clean(self):
+        """Una ubicación fuera de Barcelona no invalida el formulario: se sale del centro."""
+        cleaned = super().clean()
+        if "start_lat" in self._errors or "start_lng" in self._errors:
+            for name in ("start_lat", "start_lng"):
+                self._errors.pop(name, None)
+                cleaned.pop(name, None)
+            self.location_ignored = True
+        return cleaned
 
     @property
     def start(self) -> tuple[float, float] | None:

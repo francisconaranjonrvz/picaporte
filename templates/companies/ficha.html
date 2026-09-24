@@ -58,12 +58,12 @@
       </div>
       {% if enrichment.emails %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "mail" "size-4" %}</dt><dd class="break-all">{% for email in enrichment.emails %}<a class="underline-offset-2 hover:underline" href="mailto:{{ email }}">{{ email }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</dd></div>
       {% elif company.email %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "mail" "size-4" %}</dt><dd class="break-all"><a href="mailto:{{ company.email }}">{{ company.email }}</a></dd></div>{% endif %}
-      {% if enrichment.socials %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "globe" "size-4" %}</dt><dd>{% for network, url in enrichment.socials.items %}<a class="capitalize text-action-fill" href="{{ url }}" target="_blank" rel="noopener">{{ network }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</dd></div>{% endif %}
+      {% if enrichment.socials %}<div class="flex gap-2"><dt class="text-action-fill">{% icon "globe" "size-4" %}</dt><dd>{% for network, url in enrichment.socials.items %}{% if url|http_url %}<a class="capitalize text-action-fill" href="{{ url }}" target="_blank" rel="noopener">{{ network }}</a>{% if not forloop.last %} · {% endif %}{% endif %}{% endfor %}</dd></div>{% endif %}
     </dl>
     <div class="mt-3 grid grid-cols-3 gap-2">
       {% if company.tel_url %}{% btn href=company.tel_url variant="secondary" size="sm" %}{% icon "phone" "size-4" %}Llamar{% endbtn %}{% endif %}
       {% if company.maps_url %}{% btn href=company.maps_url variant="secondary" size="sm" %}{% icon "navigation" "size-4" %}Maps{% endbtn %}{% endif %}
-      {% if company.website %}{% btn href=company.website variant="secondary" size="sm" %}{% icon "external-link" "size-4" %}Web{% endbtn %}{% endif %}
+      {% with website=company.website|http_url %}{% if website %}{% btn href=website variant="secondary" size="sm" %}{% icon "external-link" "size-4" %}Web{% endbtn %}{% endif %}{% endwith %}
     </div>
   {% endcard %}
 

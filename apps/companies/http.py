@@ -48,6 +48,15 @@ def _key(method: str, url: str, body: str) -> str:
     return digest.hexdigest()
 
 
+def _body(data: dict | None) -> str:
+    return "&".join(f"{k}={v}" for k, v in sorted((data or {}).items()))
+
+
+def forget(url: str, *, method: str = "GET", data: dict | None = None) -> None:
+    """Borra la respuesta cacheada de una petición (un 2xx que resultó no ser válido)."""
+    FetchCache.objects.filter(key=_key(method, url, _body(data))).delete()
+
+
 def fetch(
     url: str,
     *,
@@ -59,7 +68,7 @@ def fetch(
     accept: str = "application/json",
 ) -> Fetched:
     """GET/POST con caché. Solo se cachean respuestas 2xx."""
-    body = "&".join(f"{k}={v}" for k, v in sorted((data or {}).items()))
+    body = _body(data)
     key = _key(method, url, body)
     if not force:
         hit = FetchCache.objects.filter(key=key).first()

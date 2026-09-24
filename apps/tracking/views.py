@@ -66,9 +66,8 @@ def visit_update(request, pk):
             ),
             "Seguimiento guardado",
         )
-    return render(
-        request, "tracking/_visit_form.html", {"company": company, "form": form}, status=400
-    )
+    # 200 y no 400: htmx 2 no pinta las respuestas 4xx y los errores de campo no se verían.
+    return render(request, "tracking/_visit_form.html", {"company": company, "form": form})
 
 
 @require_POST

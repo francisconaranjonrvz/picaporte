@@ -11,6 +11,7 @@ from apps.companies.models import Company
 from apps.enrichment.models import Enrichment
 from apps.routes import planner, services
 from apps.routes.models import Route, RouteStop
+from apps.tracking import services as tracking
 from apps.tracking.models import Favorite, Note, Visit
 
 TUESDAY = date(2026, 9, 22)
@@ -199,12 +200,44 @@ def test_formulario_invalido_y_sin_candidatas(auth_client, eixample):
     assert "No hay empresas para esa franja" in auth_client.get(reverse("ruta")).text
 
 
-def test_ubicacion_fuera_de_barcelona_se_rechaza(auth_client, db):
+def test_ubicacion_fuera_de_barcelona_sale_del_centro_y_avisa(auth_client, db):
+    """Antes daba un 400 mudo (los campos ocultos no pintan errores)."""
     resp = auth_client.post(
         reverse("ruta_crear"),
-        {"date": "2026-09-22", "slot": "manana", "size": 6, "start_lat": 40.4, "start_lng": -3.7},
+        {"date": "2026-09-22", "slot": "manana", "size": 6, "start_lat": 41.54, "start_lng": 2.445},
+        follow=True,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200
+    assert "fuera de Barcelona" in resp.text
+    route = Route.objects.get()
+    assert route.start_lat is None
+    assert route.start_lng is None
+
+
+def test_deshacer_no_pisa_un_estado_cambiado_despues(db):
+    stop = _stops(1)[0]
+    services.mark_stop(stop, RouteStop.State.SKIPPED)
+    tracking.set_status(stop.company, Visit.Status.CV_DELIVERED)  # desde la ficha
+    services.mark_stop(stop, RouteStop.State.PENDING)
+    assert Visit.objects.get(company=stop.company).status == Visit.Status.CV_DELIVERED
+
+    services.mark_stop(stop, RouteStop.State.VISITED)
+    tracking.set_status(stop.company, Visit.Status.DISCARDED)  # cambio posterior
+    services.mark_stop(stop, RouteStop.State.PENDING)
+    assert Visit.objects.get(company=stop.company).status == Visit.Status.DISCARDED
+
+
+def test_deshacer_cerrada_borra_su_nota(db):
+    stop = _stops(1)[0]
+    closed = Note.objects.filter(company=stop.company, text__startswith="Cerrada al pasar")
+
+    services.mark_stop(stop, RouteStop.State.CLOSED)
+    services.mark_stop(stop, RouteStop.State.CLOSED)  # repetir no duplica la nota
+    assert closed.count() == 1
+    services.mark_stop(stop, RouteStop.State.PENDING)
+    assert not closed.exists()
+    stop.refresh_from_db()
+    assert stop.closed_note is None
 
 
 def test_los_campos_de_fecha_usan_formato_iso(auth_client, db):

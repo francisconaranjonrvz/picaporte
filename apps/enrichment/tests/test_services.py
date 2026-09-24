@@ -9,7 +9,7 @@ from apps.catalog.models import Category
 from apps.companies.models import Company
 from apps.enrichment import services
 from apps.enrichment.crawler import CrawlError, CrawlResult, Page
-from apps.enrichment.models import CompanyPage, Enrichment
+from apps.enrichment.models import MAX_EXTRACTION_ATTEMPTS, CompanyPage, Enrichment
 from apps.enrichment.profile import profile_fingerprint, stale_scores_count
 from apps.enrichment.schemas import CompanyScore, ExtractedCompany, ScoreBatch
 from apps.llm.client import LLMError, LLMNotConfigured
@@ -371,3 +371,77 @@ def test_un_fallo_al_guardar_no_tumba_el_lote(db, monkeypatch):
     assert stats.crawled == 2
     assert Enrichment.objects.get(company=ok).crawl_status == "ok"
     assert "Error al guardar" in Enrichment.objects.get(company=bad).crawl_error
+
+
+def test_si_falla_el_guardado_el_error_se_guarda_sin_reusar_la_instancia(db, monkeypatch):
+    from django.db import DataError
+
+    company = _company("Rara", "https://rara.es")
+    services.ensure_enrichments()
+    real_save = Enrichment.save
+
+    def save_that_rejects_socials(self, *args, **kwargs):
+        # Como Postgres con un NUL en jsonb: falla mientras la instancia lleve esos datos.
+        if self.socials:
+            raise DataError("unsupported Unicode escape sequence")
+        return real_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(Enrichment, "save", save_that_rejects_socials)
+    monkeypatch.setattr(services, "crawl_site", lambda url: _crawl_result(url))
+    stats = services.EnrichStats()
+    services.crawl(services.select_for_crawl(10), stats, services.Deadline(None), workers=1)
+
+    e = Enrichment.objects.get(company=company)
+    assert stats.crawl_status == {"unreachable": 1}
+    assert e.crawl_status == "unreachable"
+    assert "Error al guardar" in e.crawl_error
+    assert e.crawled_at is not None  # no vuelve a ser la primera la noche siguiente
+
+
+def test_una_extraccion_que_falla_siempre_se_abandona_y_se_puntua(profile, monkeypatch):
+    monkeypatch.setattr(services, "MAX_CONSECUTIVE_LLM_ERRORS", 99)
+    company = _company("Buzz", "https://buzz.es", category="eventos")
+    services.ensure_enrichments()
+    services.save_crawl(company.enrichment, _crawl_result())
+    calls = []
+
+    def fail(**kwargs):
+        calls.append(1)
+        raise LLMError("La IA no devolvió un JSON válido tras dos intentos.")
+
+    monkeypatch.setattr(services, "call_structured", fail)
+    for _ in range(5):  # cinco noches
+        services.extract(services.EnrichStats(), services.Deadline(None), workers=1)
+    assert len(calls) == MAX_EXTRACTION_ATTEMPTS
+    e = Enrichment.objects.get(company=company)
+    assert not e.needs_extraction
+    assert services.select_for_scoring(profile_fingerprint(profile)) == [e]
+
+    # Un nuevo rastreo le da otra oportunidad.
+    services.save_crawl(e, _crawl_result())
+    assert Enrichment.objects.get(company=company).needs_extraction
+
+
+def test_lote_de_puntuacion_sin_ids_validos_no_queda_en_cache(profile, monkeypatch):
+    from apps.llm.models import LLMCall
+
+    company = _company("Eventos Sol", "", category="eventos")
+    services.ensure_enrichments()
+    call = LLMCall.objects.create(
+        purpose=LLMCall.Purpose.SCORING,
+        model="fake-fast",
+        prompt_version="v1",
+        input_hash="x" * 64,
+        response={"scores": []},
+    )
+    monkeypatch.setattr(
+        services,
+        "call_structured",
+        lambda **kw: SimpleNamespace(output=_scores((999, 50)), call=call, cached=False),
+    )
+    stats = services.EnrichStats()
+    services.score(profile, stats, services.Deadline(None), workers=1)
+
+    assert (stats.scored, stats.llm_errors) == (0, 1)
+    assert not LLMCall.objects.filter(pk=call.pk).exists()  # la próxima noche se vuelve a pedir
+    assert Enrichment.objects.get(company=company).fit_score is None

@@ -87,18 +87,28 @@ def maps_legs(stops: list[RouteStop]) -> list[tuple[int, int, str]]:
 def mark_stop(stop: RouteStop, state: str) -> RouteStop:
     """Marca la parada y refleja el resultado en el seguimiento; "pendiente" deshace."""
     if state == RouteStop.State.PENDING:
-        if stop.is_done and stop.previous_status:
+        # Solo se restaura si nadie ha cambiado el estado después (ficha u otra ruta).
+        applied = STATE_TO_VISIT.get(stop.state)
+        if (
+            stop.is_done
+            and stop.previous_status
+            and applied is not None
+            and tracking.visit_for(stop.company).status == applied
+        ):
             tracking.set_status(stop.company, stop.previous_status)
         stop.previous_status = ""
     elif not stop.is_done:
         stop.previous_status = tracking.visit_for(stop.company).status
+    if state != RouteStop.State.CLOSED and stop.closed_note_id:
+        stop.closed_note.delete()
+        stop.closed_note = None
+    elif state == RouteStop.State.CLOSED and stop.closed_note_id is None:
+        stop.closed_note = Note.objects.create(
+            company=stop.company, text=f"Cerrada al pasar en la ruta del {stop.route.date:%d/%m}."
+        )
     stop.state = state
-    stop.save(update_fields=["state", "previous_status", "updated_at"])
+    stop.save(update_fields=["state", "previous_status", "closed_note", "updated_at"])
     status = STATE_TO_VISIT.get(state)
     if status is not None:
         tracking.set_status(stop.company, status)
-    if state == RouteStop.State.CLOSED:
-        Note.objects.create(
-            company=stop.company, text=f"Cerrada al pasar en la ruta del {stop.route.date:%d/%m}."
-        )
     return stop

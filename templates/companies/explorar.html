@@ -23,7 +23,7 @@
     <input id="f-q" name="q" type="search" class="field-input" placeholder="Nombre o servicio…" autocomplete="off"
            value="{{ form.q.value|default:'' }}">
     <button type="button" class="chip min-h-11 shrink-0" x-on:click="open = !open" x-bind:aria-expanded="open" aria-controls="filter-panel">
-      {% icon "sliders" "size-4" %}Filtros{% if form.active_count %} · {{ form.active_count }}{% endif %}
+      {% icon "sliders" "size-4" %}Filtros{% include "companies/_filters_count.html" %}
     </button>
   </div>
 
@@ -47,9 +47,7 @@
       </select>
     </div>
     {% endif %}{% endfor %}
-    {% if form.active_count %}
-    <a href="{% url 'explorar' %}" class="col-span-2 py-2 text-center text-sm font-semibold text-action-fill">Quitar filtros</a>
-    {% endif %}
+    {% include "companies/_filters_reset.html" %}
   </div>
 </form>
 

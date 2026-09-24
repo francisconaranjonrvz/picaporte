@@ -6,7 +6,8 @@ worker. Reglas:
 - `robots.txt` se consulta por dominio antes de cada URL (sin robots.txt -> se
   permite; si el servidor falla -> no se rastrea, por prudencia).
 - Máximo `MAX_PAGES` páginas por dominio, `PAGE_DELAY` s entre peticiones al
-  mismo dominio, timeout corto, solo HTML y como mucho `MAX_BYTES` por página.
+  mismo dominio, timeout corto (y `MAX_SECONDS` en total por descarga), solo
+  HTML y como mucho `MAX_BYTES` por página.
 - Solo se guarda el texto visible (recortado), nunca el HTML: Neon Free tiene
   0,5 GB y el texto es lo único que necesita el LLM.
 - Emails y redes sociales se extraen de forma determinista (regex y enlaces),
@@ -26,6 +27,8 @@ from apps.companies.http import USER_AGENT
 
 MAX_PAGES = 5
 MAX_BYTES = 2_000_000
+MAX_ROBOTS_BYTES = 512_000
+MAX_SECONDS = 30.0  # por descarga: el timeout de httpx es entre lecturas, no total
 MAX_PAGE_CHARS = 6_000
 PAGE_DELAY = 1.0
 TIMEOUT = httpx.Timeout(15.0, connect=8.0)
@@ -83,11 +86,23 @@ class Fetched:
     url: str
     status_code: int
     content_type: str
-    content: bytes  # ya descomprimido; BeautifulSoup detecta la codificación
+    content: bytes  # ya descomprimido
+    encoding: str | None = None  # charset de la cabecera Content-Type, si lo trae
 
     @property
     def is_html(self) -> bool:
         return "html" in self.content_type
+
+    @property
+    def markup(self) -> str | bytes:
+        """Texto con el charset de la cabecera (manda sobre el <meta>); sin él, los bytes
+        y BeautifulSoup detecta la codificación."""
+        if self.encoding:
+            try:
+                return self.content.decode(self.encoding, errors="replace")
+            except LookupError:
+                pass
+        return self.content
 
 
 @dataclass
@@ -109,7 +124,10 @@ class CrawlResult:
 
 
 def host_of(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:  # p. ej. un placeholder de plantilla: "http://[tu-dominio]/"
+        return ""
     return host[4:] if host.startswith("www.") else host
 
 
@@ -141,17 +159,35 @@ def html_to_text(html: str | bytes) -> tuple[str, str, BeautifulSoup]:
     soup = BeautifulSoup(html, "html.parser")
     lang = ""
     if soup.html is not None:
-        lang = (soup.html.get("lang") or "").split("-")[0].lower()[:12]
+        lang = _no_nul(soup.html.get("lang") or "").split("-")[0].lower()[:12]
     for tag in soup(DROP_TAGS):
         tag.decompose()
-    lines = (" ".join(line.split()) for line in soup.get_text("\n").splitlines())
+    # Postgres no admite NUL en text ni en jsonb: se quitan aquí.
+    lines = (" ".join(line.split()) for line in _no_nul(soup.get_text("\n")).splitlines())
     text = "\n".join(line for line in lines if line)
     return text[:MAX_PAGE_CHARS], lang, soup
 
 
+def _no_nul(value: str) -> str:
+    return value.replace("\x00", "")
+
+
+def _trim_partial_utf8(data: bytes) -> bytes:
+    """Quita el carácter UTF-8 que el corte a `MAX_BYTES` ha dejado a medias: si no, la
+    decodificación estricta falla y toda la página se lee como windows-1252."""
+    for back in range(1, min(4, len(data)) + 1):
+        byte = data[-back]
+        if byte & 0xC0 != 0x80:  # ASCII o byte inicial de una secuencia
+            need = 1 if byte < 0x80 else 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            return data[:-back] if need > back else data
+    return data
+
+
 def find_emails(text: str, soup: BeautifulSoup) -> list[str]:
     found = [
-        a["href"][7:].split("?")[0] for a in soup.select('a[href^="mailto:"]') if a.get("href")
+        _no_nul(a["href"])[7:].split("?")[0]
+        for a in soup.select('a[href^="mailto:"]')
+        if a.get("href")
     ]
     found += EMAIL_RE.findall(text)
     emails: list[str] = []
@@ -162,13 +198,20 @@ def find_emails(text: str, soup: BeautifulSoup) -> list[str]:
     return emails[:5]
 
 
-def find_socials(soup: BeautifulSoup) -> dict[str, str]:
+def find_socials(soup: BeautifulSoup, base_url: str) -> dict[str, str]:
+    """Enlaces absolutos http(s) a redes sociales (nunca `javascript:` ni otros esquemas)."""
     socials: dict[str, str] = {}
     for a in soup.find_all("a", href=True):
-        host = host_of(a["href"])
+        try:
+            href = urljoin(base_url, _no_nul(a["href"]).strip())
+        except ValueError:
+            continue
+        if urlsplit(href).scheme not in ("http", "https"):
+            continue
+        host = host_of(href)
         for social_host, network in SOCIAL_HOSTS.items():
             if (host == social_host or host.endswith(f".{social_host}")) and network not in socials:
-                socials[network] = a["href"].split("?")[0]
+                socials[network] = href.split("?")[0]
     return socials
 
 
@@ -179,7 +222,10 @@ def pick_links(soup: BeautifulSoup, base_url: str, site_host: str) -> dict[str, 
         href = a["href"].strip()
         if href.startswith(("mailto:", "tel:", "javascript:", "#")):
             continue
-        url = urljoin(base_url, href).split("#")[0]
+        try:
+            url = urljoin(base_url, href).split("#")[0]
+        except ValueError:  # enlace mal formado: se ignora, no aborta el rastreo
+            continue
         if not url.startswith("http") or not same_site(url, site_host):
             continue
         if re.search(r"\.(pdf|jpe?g|png|gif|zip|mp4)$", url, re.I):
@@ -201,32 +247,71 @@ def pick_links(soup: BeautifulSoup, base_url: str, site_host: str) -> dict[str, 
 class Crawler:
     """Un rastreo por instancia (un dominio). `client` y `sleep` se inyectan en los tests."""
 
-    def __init__(self, client: httpx.Client | None = None, sleep=time.sleep, delay=PAGE_DELAY):
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        sleep=time.sleep,
+        delay=PAGE_DELAY,
+        clock=time.monotonic,
+    ):
         self.client = client or httpx.Client(
             headers=HEADERS, timeout=TIMEOUT, follow_redirects=True
         )
         self.sleep = sleep
         self.delay = delay
+        self.clock = clock
         self._robots: dict[str, RobotFileParser | None] = {}
         self._requests = 0
 
     def close(self) -> None:
         self.client.close()
 
+    def _download(self, url: str, max_bytes: int, headers: dict | None = None) -> Fetched:
+        """GET en streaming con tope de tamaño y de tiempo total (contra servidores que
+        mandan los bytes con cuentagotas)."""
+        started = self.clock()
+        with self.client.stream("GET", url, headers=headers) as response:
+            chunks, size = [], 0
+            for chunk in response.iter_bytes():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= max_bytes:
+                    break
+                if self.clock() - started > MAX_SECONDS:
+                    raise httpx.ReadTimeout(f"más de {MAX_SECONDS:.0f} s descargando {url}")
+            content = b"".join(chunks)
+            if size >= max_bytes:
+                content = _trim_partial_utf8(content[:max_bytes])
+            return Fetched(
+                url=str(response.url),
+                status_code=response.status_code,
+                content_type=response.headers.get("content-type", ""),
+                content=content,
+                encoding=response.charset_encoding,
+            )
+
     def _robots_for(self, url: str) -> RobotFileParser | None:
-        """None = no se puede rastrear el dominio (robots.txt inaccesible por error del servidor)."""
+        """None = no se puede rastrear el dominio (robots.txt inaccesible por error del servidor).
+
+        Un fallo de red (DNS, TLS, timeout) se propaga: la web está caída, no prohibida.
+        """
         parts = urlsplit(url)
         origin = f"{parts.scheme}://{parts.netloc}"
         if origin not in self._robots:
             parser = RobotFileParser()
             try:
-                response = self.client.get(f"{origin}/robots.txt", headers={"Accept": "text/plain"})
+                response = self._download(
+                    f"{origin}/robots.txt", MAX_ROBOTS_BYTES, headers={"Accept": "text/plain"}
+                )
                 if response.status_code >= 500:
                     parser = None
                 elif response.status_code >= 400:
                     parser.parse([])  # sin robots.txt: todo permitido
                 else:
-                    parser.parse(response.text.splitlines())
+                    text = response.content.decode("utf-8", errors="replace")
+                    parser.parse(text.splitlines())
+            except httpx.TransportError:
+                raise
             except httpx.HTTPError:
                 parser = None
             self._robots[origin] = parser
@@ -240,27 +325,15 @@ class Crawler:
         if self._requests:
             self.sleep(self.delay)
         self._requests += 1
-        with self.client.stream("GET", url) as response:
-            chunks, size = [], 0
-            for chunk in response.iter_bytes():
-                chunks.append(chunk)
-                size += len(chunk)
-                if size >= MAX_BYTES:
-                    break
-            return Fetched(
-                url=str(response.url),
-                status_code=response.status_code,
-                content_type=response.headers.get("content-type", ""),
-                content=b"".join(chunks)[:MAX_BYTES],
-            )
+        return self._download(url, MAX_BYTES)
 
     def crawl(self, website: str) -> CrawlResult:
         start = normalize_start_url(website)
         if is_not_a_site(start):
             raise CrawlError("not_a_site", f"{host_of(start)} no es una web propia")
-        if not self.allowed(start):
-            raise CrawlError("robots", "robots.txt no permite rastrear la home")
         try:
+            if not self.allowed(start):
+                raise CrawlError("robots", "robots.txt no permite rastrear la home")
             home = self.get(start)
         except httpx.HTTPError as exc:
             raise CrawlError("unreachable", f"{type(exc).__name__}: {exc}"[:300]) from exc
@@ -272,33 +345,41 @@ class Crawler:
         if not home.is_html:
             raise CrawlError("not_html", "la home no es HTML")
 
-        text, lang, soup = html_to_text(home.content)
+        text, lang, soup = html_to_text(home.markup)
         result = CrawlResult(start_url=start, final_url=final_url)
         result.pages.append(Page(final_url, "home", home.status_code, text, lang))
         emails = find_emails(text, soup)
-        socials = find_socials(soup)
+        socials = find_socials(soup, final_url)
 
         site_host = host_of(final_url)
         for kind, url in pick_links(soup, final_url, site_host).items():
             if len(result.pages) >= MAX_PAGES:
                 break
-            if not self.allowed(url):
-                continue
             try:
+                if not self.allowed(url):
+                    continue
                 response = self.get(url)
-            except httpx.HTTPError:
+                # Una redirección a otro dominio (LinkedIn, un portal de empleo) ya no es la
+                # web de la empresa, y el destino tiene su propio robots.txt.
+                if (
+                    not same_site(response.url, site_host)
+                    or is_not_a_site(response.url)
+                    or not self.allowed(response.url)
+                ):
+                    continue
+            except (httpx.HTTPError, httpx.InvalidURL, ValueError):
                 continue
             if response.status_code >= 400 or not response.is_html:
                 continue
             # Dos enlaces pueden acabar en la misma página tras redirecciones (p. ej. a la home).
             if response.url in {page.url for page in result.pages}:
                 continue
-            page_text, page_lang, page_soup = html_to_text(response.content)
+            page_text, page_lang, page_soup = html_to_text(response.markup)
             result.pages.append(
                 Page(response.url, kind, response.status_code, page_text, page_lang)
             )
             emails += [e for e in find_emails(page_text, page_soup) if e not in emails]
-            for network, link in find_socials(page_soup).items():
+            for network, link in find_socials(page_soup, response.url).items():
                 socials.setdefault(network, link)
         result.emails = emails[:5]
         result.socials = socials

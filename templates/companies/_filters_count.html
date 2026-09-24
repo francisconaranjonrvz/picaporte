@@ -1,0 +1,2 @@
+{# Contador del botón "Filtros"; con `oob` se actualiza fuera de banda al filtrar por HTMX. #}
+<span id="filters-count"{% if oob %} hx-swap-oob="true"{% endif %}>{% if form.active_count %} · {{ form.active_count }}{% endif %}</span>

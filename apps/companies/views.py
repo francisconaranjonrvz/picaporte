@@ -1,8 +1,7 @@
 """Pestañas Explorar y Mapa, ficha de empresa y panel de estado de los datos."""
 
-from django.core.paginator import Paginator
 from django.db.models import Count
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
@@ -30,27 +29,48 @@ def _with_opening(companies, now):
     return companies
 
 
+def _batch(results) -> dict:
+    """Una tanda de tarjetas y el cursor para la siguiente (la última empresa mostrada)."""
+    companies = list(results[: PAGE_SIZE + 1])
+    has_next = len(companies) > PAGE_SIZE
+    companies = _with_opening(companies[:PAGE_SIZE], timezone.localtime())
+    return {"companies": companies, "next_after": companies[-1].pk if has_next else None}
+
+
 @require_GET
 def explorar(request):
-    """Lista filtrable. Con HTMX devuelve solo la página pedida (filtros o "cargar más")."""
+    """Lista filtrable. Con HTMX devuelve solo la lista (filtros) o la siguiente tanda.
+
+    "Cargar más" pide `after=<pk>` (cursor) en vez de un número de página: si la lista
+    cambia entre tanda y tanda (favoritas quitadas, "Abierto ahora" a una hora en punto),
+    no se saltan ni se repiten tarjetas.
+    """
     form = CompanyFilter(request.GET or None)
-    results = form.apply()
-    page = Paginator(results, PAGE_SIZE).get_page(request.GET.get("page"))
-    _with_opening(page.object_list, timezone.localtime())
     query = request.GET.copy()
-    query.pop("page", None)
-    context = {
-        "title": "Explorar",
-        "form": form,
-        "page": page,
-        "query": query.urlencode(),
-        "total_active": Company.objects.filter(is_active=True).count(),
-    }
-    if request.htmx and request.htmx.target in {"company-list", "load-more"}:
-        template = (
-            "companies/_list_page.html" if request.GET.get("page") else "companies/_list.html"
-        )
-        return render(request, template, context)
+    query.pop("after", None)
+    context = {"title": "Explorar", "form": form, "query": query.urlencode()}
+    if request.htmx and "after" in request.GET:
+        try:
+            anchor = (
+                Company.objects.select_related("enrichment")
+                .filter(pk=int(request.GET["after"]))
+                .first()
+            )
+        except (ValueError, OverflowError):
+            anchor = None
+        if anchor is None:
+            return HttpResponse("")  # cursor inválido: quita el botón sin añadir tarjetas
+        context.update(_batch(form.apply(after=anchor)))
+        return render(request, "companies/_list_page.html", context)
+    results = form.apply()
+    context.update(
+        _batch(results),
+        total=len(results) if isinstance(results, list) else results.count(),
+        total_active=Company.objects.filter(is_active=True).count(),
+    )
+    if request.htmx and request.htmx.target == "company-list":
+        context["oob"] = True  # actualiza también el contador de filtros y "Quitar filtros"
+        return render(request, "companies/_list.html", context)
     return render(request, "companies/explorar.html", context)
 
 

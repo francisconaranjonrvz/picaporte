@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 import httpx
@@ -244,3 +245,24 @@ def test_enriquecimiento_desde_la_app_pasa_el_modo(auth_client, token, monkeypat
 def test_tipo_de_trabajo_desconocido_es_404(auth_client):
     assert auth_client.post(reverse("job_trigger", args=["borrar"])).status_code == 404
     assert auth_client.get(reverse("job_status", args=["borrar"])).status_code == 404
+
+
+def test_al_terminar_el_trabajo_el_sondeo_avisa_a_la_pagina(auth_client, db):
+    """Los botones de /datos/ y Perfil se pintan deshabilitados mientras hay un trabajo activo.
+
+    Se avisa con un evento (no HX-Refresh) para que Perfil no pierda lo que se está escribiendo.
+    """
+    job = JobRun.objects.create(kind=JobRun.Kind.ENRICH, status=JobRun.Status.RUNNING)
+    url = reverse("job_status", args=["enrich"])
+
+    resp = auth_client.get(url, HTTP_HX_REQUEST="true")
+    assert 'hx-trigger="every 10s"' in resp.text
+    assert "HX-Trigger" not in resp
+
+    job.status = JobRun.Status.SUCCESS
+    job.finished_at = timezone.now()
+    job.save()
+    resp = auth_client.get(url, HTTP_HX_REQUEST="true")
+    assert json.loads(resp["HX-Trigger"]) == {"job-finished": "enrich"}
+    assert "HX-Refresh" not in resp
+    assert "data-reload-on-job-finished" in auth_client.get(reverse("datos")).text

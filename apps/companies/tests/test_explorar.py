@@ -107,13 +107,108 @@ def test_explorar_pagina_y_carga_mas_por_htmx(auth_client, monkeypatch):
     assert "Empresa 2" not in resp.text
     assert 'id="load-more"' in resp.text
 
+    empresa_1 = Company.objects.get(name="Empresa 1")
+    assert f"after={empresa_1.pk}" in resp.text  # cursor: la última tarjeta mostrada
+
     resp = auth_client.get(
-        reverse("explorar") + "?page=2", HTTP_HX_REQUEST="true", HTTP_HX_TARGET="load-more"
+        reverse("explorar") + f"?after={empresa_1.pk}",
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_TARGET="load-more",
     )
     assert "<html" not in resp.text  # parcial
     assert "Empresa 2" in resp.text
     assert "Empresa 0" not in resp.text
-    assert "page=3" in resp.text
+    empresa_3 = Company.objects.get(name="Empresa 3")
+    assert f"after={empresa_3.pk}" in resp.text
+
+
+def _load_more(client, query):
+    resp = client.get(
+        reverse("explorar") + "?" + query, HTTP_HX_REQUEST="true", HTTP_HX_TARGET="load-more"
+    )
+    return resp, [c.name for c in resp.context["companies"]] if resp.context else []
+
+
+def test_cargar_mas_no_se_salta_tarjetas_si_la_lista_encoge(auth_client, monkeypatch):
+    """Con "Solo favoritas", quitar corazones de la 1.ª tanda no hace saltar la 2.ª."""
+    monkeypatch.setattr("apps.companies.views.PAGE_SIZE", 2)
+    companies = [_company(f"Empresa {i}", 90 - i) for i in range(5)]
+    for company in companies:
+        Favorite.objects.create(company=company)
+
+    resp = auth_client.get(reverse("explorar") + "?favorites=on")
+    assert [c.name for c in resp.context["companies"]] == ["Empresa 0", "Empresa 1"]
+    Favorite.objects.filter(company__in=companies[:2]).delete()  # corazones de la 1.ª tanda
+
+    _, names = _load_more(auth_client, f"favorites=on&after={companies[1].pk}")
+    assert names == ["Empresa 2", "Empresa 3"]
+
+
+def test_cargar_mas_con_cursor_invalido_no_repite_tarjetas(auth_client, companies):
+    for after in ("999", "abc", "9" * 40):
+        resp, names = _load_more(auth_client, f"after={after}")
+        assert resp.status_code == 200
+        assert resp.text == ""
+        assert names == []
+
+
+@pytest.mark.parametrize("sort", ["encaje", "confianza", "nombre"])
+def test_cargar_mas_recorre_todo_sin_repetir_en_cada_orden(auth_client, monkeypatch, sort):
+    monkeypatch.setattr("apps.companies.views.PAGE_SIZE", 2)
+    # Empates de encaje, de confianza y de nombre, y empresas sin puntuar.
+    for i, (score, confidence) in enumerate([(80, 50), (80, 50), (None, 50), (None, 20), (60, 90)]):
+        _company("Igual" if i < 2 else f"Empresa {i}", score, confidence_score=confidence)
+    expected = [c.pk for c in CompanyFilter({"sort": sort}).apply()]
+
+    resp = auth_client.get(reverse("explorar") + f"?sort={sort}")
+    seen = [c.pk for c in resp.context["companies"]]
+    while resp.context and resp.context["next_after"]:
+        resp = auth_client.get(
+            reverse("explorar") + f"?sort={sort}&after={resp.context['next_after']}",
+            HTTP_HX_REQUEST="true",
+            HTTP_HX_TARGET="load-more",
+        )
+        seen += [c.pk for c in resp.context["companies"]]
+    assert seen == expected
+
+
+def test_portada_sin_parametros_ordena_por_encaje(auth_client, companies):
+    """GET / sin filtros: el selector dice "Mejor encaje" y el orden debe serlo."""
+    _company("Muy segura", None, confidence_score=100)
+    resp = auth_client.get(reverse("explorar"))
+    names = [c.name for c in resp.context["companies"]]
+    assert names == ["Agencia Sol", "Eventos Mar", "Muy segura", "Cowork Luna"]
+
+
+def test_un_parametro_invalido_no_anula_los_demas(companies):
+    eventos = Category.objects.get(slug="eventos")
+    eventos.is_active = False
+    eventos.save()
+    form = CompanyFilter({"q": "luna", "category": eventos.pk, "score": "999"})
+    assert [c.name for c in form.apply()] == ["Cowork Luna"]
+    assert _names({"q": "x" * 200}) == []  # búsqueda larguísima: se recorta, no invalida
+    assert CompanyFilter({"favorites": "on", "zone": "abc"}).active_count == 1
+
+
+def test_filtrar_por_htmx_actualiza_contador_y_quitar_filtros(auth_client, companies):
+    resp = auth_client.get(
+        reverse("explorar") + "?score=60&favorites=on",
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_TARGET="company-list",
+    )
+    html = resp.text
+    assert '<span id="filters-count" hx-swap-oob="true"> · 2</span>' in html
+    assert 'id="filters-reset" class="col-span-2" hx-swap-oob="true"' in html
+
+    resp = auth_client.get(
+        reverse("explorar") + "?q=sol", HTTP_HX_REQUEST="true", HTTP_HX_TARGET="company-list"
+    )
+    assert '<span id="filters-count" hx-swap-oob="true"></span>' in resp.text
+    assert 'id="filters-reset" class="col-span-2" hidden hx-swap-oob="true"' in resp.text
+
+    page = auth_client.get(reverse("explorar")).text  # página entera: sin OOB
+    assert 'id="filters-count"' in page
+    assert "hx-swap-oob" not in page
 
 
 def test_explorar_filtra_por_htmx_y_conserva_la_consulta(auth_client, companies):
@@ -153,6 +248,27 @@ def test_ficha_muestra_datos_y_acciones(auth_client, companies):
     assert "Horario de oficina estimado" in html
     assert "CV entregado" in html  # botones de estado
     assert 'name="next_action"' in html
+
+
+@pytest.mark.parametrize(
+    ("website", "shown"),
+    [
+        ("https://sol.com", True),
+        ("HTTP://sol.com", True),
+        ("www.sol.com", False),  # sería un enlace relativo a /empresa/<pk>/…: 404
+        ("javascript:alert(1)", False),
+    ],
+)
+def test_boton_web_de_la_ficha_solo_con_url_http(auth_client, companies, website, shown):
+    company = companies["a"]
+    company.website = website
+    company.save()
+    Enrichment.objects.filter(company=company).update(
+        socials={"instagram": "javascript://instagram.com/%0aalert(1)"}
+    )
+    html = auth_client.get(reverse("ficha", args=[company.pk])).text
+    assert (f'href="{website}"' in html) is shown
+    assert "javascript:" not in html
 
 
 def test_ficha_de_empresa_inexistente(auth_client, db):

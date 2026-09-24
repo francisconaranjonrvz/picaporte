@@ -55,6 +55,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # Todo requiere login salvo lo marcado con @login_not_required (falla cerrado).
     "django.contrib.auth.middleware.LoginRequiredMiddleware",
+    # Con la sesión caducada, las peticiones HTMX van al login como página entera.
+    "apps.core.middleware.HtmxLoginRedirectMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",

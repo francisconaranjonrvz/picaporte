@@ -6,6 +6,8 @@
   endpoint alojado rechaza `nvext.guided_json`; si un modelo tampoco admite
   `response_format`, se reintenta sin él) + validación Pydantic con un intento
   de reparación si el JSON no valida.
+- Todas las llamadas de un `complete()` comparten `TOTAL_BUDGET` segundos: la
+  reparación no puede empujar la función de Vercel más allá de su maxDuration.
 - Modelo por defecto `google/gemma-4-31b-it`: en un benchmark con CV difícil
   (catalán, siglas, secciones desordenadas) acertó el 100 % de los campos en
   ~30 s; `openai/gpt-oss-20b` es la alternativa (76-88 %, 16-90 s). Los modelos
@@ -20,13 +22,14 @@ import io
 import json
 import logging
 import re
+import time
 from decimal import Decimal
 
 import openai
 import pydantic
 from pydantic import BaseModel
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf.errors import DependencyError, PyPdfError
 
 from django.conf import settings
 
@@ -39,6 +42,9 @@ BASE_URL = "https://integrate.api.nvidia.com/v1"
 NO_THINKING_MODELS = {"nvidia/nemotron-3.5-lightning-30b-a3b"}
 MAX_DOCUMENT_CHARS = 40_000  # ~10k tokens: de sobra para un CV; evita facturas de contexto
 FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
+TOTAL_BUDGET = 110.0  # s para todas las llamadas de un complete() (Vercel corta a los 120)
+MIN_CALL_SECONDS = 15.0  # con menos margen, otra llamada ya no llegaría a tiempo
+_now = time.monotonic
 
 
 def extract_pdf_text(data: bytes) -> str:
@@ -46,8 +52,11 @@ def extract_pdf_text(data: bytes) -> str:
     try:
         reader = PdfReader(io.BytesIO(data))
         pages = [page.extract_text() or "" for page in reader.pages]
-    except PdfReadError as exc:
-        raise LLMError("No se pudo leer el PDF (¿está dañado o protegido?).") from exc
+    except (PyPdfError, DependencyError) as exc:
+        # DependencyError: cifrado AES (restringir edición) sin el paquete `cryptography`.
+        raise LLMError(
+            "No se pudo leer el PDF (¿está dañado o protegido? Expórtalo sin protección)."
+        ) from exc
     text = "\n\n".join(p.strip() for p in pages if p.strip()).strip()
     if not text:
         raise LLMError(
@@ -99,7 +108,8 @@ class NvidiaProvider:
         ]
 
         client = self._client()
-        content, usage_in, usage_out = self._chat(client, model, messages, max_tokens)
+        deadline = _now() + TOTAL_BUDGET
+        content, usage_in, usage_out = self._chat(client, model, messages, max_tokens, deadline)
         try:
             return Completion(_parse(output_model, content), usage_in, usage_out)
         except pydantic.ValidationError as exc:
@@ -113,13 +123,15 @@ class NvidiaProvider:
                 {"role": "assistant", "content": content},
                 {"role": "user", "content": fix},
             ]
-            content2, in2, out2 = self._chat(client, model, messages, max_tokens)
+            if deadline - _now() < MIN_CALL_SECONDS:
+                raise LLMError("La IA devolvió un JSON no válido; vuelve a intentarlo.") from exc
+            content2, in2, out2 = self._chat(client, model, messages, max_tokens, deadline)
             try:
                 return Completion(_parse(output_model, content2), usage_in + in2, usage_out + out2)
             except pydantic.ValidationError as exc2:
                 raise LLMError("La IA no devolvió un JSON válido tras dos intentos.") from exc2
 
-    def _chat(self, client, model, messages, max_tokens) -> tuple[str, int, int]:
+    def _chat(self, client, model, messages, max_tokens, deadline) -> tuple[str, int, int]:
         params = {
             "model": model,
             "messages": messages,
@@ -132,12 +144,14 @@ class NvidiaProvider:
         try:
             try:
                 response = client.chat.completions.create(
-                    **params, response_format={"type": "json_object"}
+                    **params,
+                    response_format={"type": "json_object"},
+                    timeout=_call_timeout(deadline),
                 )
             except openai.BadRequestError as exc:
                 # Algún modelo alojado no admite response_format: el esquema del prompt basta.
                 logger.info("response_format rechazado (%s); reintento sin él", exc.message)
-                response = client.chat.completions.create(**params)
+                response = client.chat.completions.create(**params, timeout=_call_timeout(deadline))
         except openai.AuthenticationError as exc:
             raise LLMError("La clave de la API de NVIDIA no es válida.") from exc
         except openai.RateLimitError as exc:
@@ -164,16 +178,37 @@ class NvidiaProvider:
         )
 
 
+def _call_timeout(deadline: float) -> float:
+    """Timeout de la próxima llamada: el de settings, sin pasarse del plazo común."""
+    remaining = deadline - _now()
+    if remaining < MIN_CALL_SECONDS:
+        raise LLMError("La IA ha tardado demasiado; vuelve a intentarlo.")
+    return min(float(settings.LLM_TIMEOUT), remaining)
+
+
 def _looks_like_schema(content: str) -> bool:
     """Algunos modelos pequeños devuelven el esquema recibido en vez de rellenarlo."""
-    return '"properties"' in content and '"type"' in content
+    return '"properties"' in content and any(
+        key in content for key in ('"type"', '"required"', '"title"')
+    )
 
 
 def _parse[T: BaseModel](output_model: type[T], content: str) -> T:
-    """Valida el JSON; tolera vallas ```json y texto alrededor del objeto."""
+    """Valida el JSON; tolera vallas ```json, texto alrededor del objeto y los datos
+    envueltos en la forma del esquema (`{"properties": {...datos...}, "required": ...}`)."""
     text = FENCE_RE.sub("", content).strip()
     if not text.startswith("{"):
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
             text = text[start : end + 1]
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        obj = None
+    if isinstance(obj, dict) and isinstance(obj.get("properties"), dict):
+        fields = output_model.model_fields
+        required = [name for name, info in fields.items() if info.is_required()]
+        if not any(name in obj for name in required):
+            outer = {k: v for k, v in obj.items() if k in fields}
+            return output_model.model_validate({**obj["properties"], **outer})
     return output_model.model_validate_json(text)

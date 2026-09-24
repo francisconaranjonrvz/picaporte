@@ -31,6 +31,12 @@
         },
       }));
     });
+    // Fin de un trabajo en GitHub Actions: se recargan las páginas cuyas cifras cambian
+    // (data-reload-on-job-finished) y en las demás solo se reactivan los botones.
+    document.addEventListener("job-finished", () => {
+      if (document.querySelector("[data-reload-on-job-finished]")) return window.location.reload();
+      document.querySelectorAll('form[hx-post^="/jobs/"] button[disabled]').forEach((b) => { b.disabled = false; });
+    });
     document.addEventListener("htmx:sendError", () => {
       window.dispatchEvent(new CustomEvent("toast", { detail: "Sin conexión. Inténtalo de nuevo." }));
     });

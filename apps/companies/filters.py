@@ -31,7 +31,7 @@ SORT_CHOICES = [("encaje", "Mejor encaje"), ("confianza", "Más confianza"), ("n
 
 
 class CompanyFilter(forms.Form):
-    q = forms.CharField(required=False, max_length=80, label="Buscar")
+    q = forms.CharField(required=False, label="Buscar")
     score = forms.ChoiceField(required=False, choices=SCORE_CHOICES, label="Encaje")
     category = forms.ModelChoiceField(
         required=False,
@@ -60,18 +60,31 @@ class CompanyFilter(forms.Form):
             *Visit.Status.choices,
         ]
 
+    def clean_q(self) -> str:
+        return self.cleaned_data["q"][:80]  # una búsqueda larguísima se recorta, no invalida
+
+    def values(self) -> dict:
+        """Valores limpios; un campo inválido (o un formulario sin datos) cuenta como vacío.
+
+        Así un parámetro que ya no vale (p. ej. una categoría desactivada) no anula los demás.
+        """
+        self.is_valid()
+        cleaned = getattr(self, "cleaned_data", {})
+        return {name: cleaned.get(name) for name in self.fields}
+
     @property
     def active_count(self) -> int:
-        if not self.is_valid():
-            return 0
-        return sum(1 for k, v in self.cleaned_data.items() if v and k not in {"sort", "q"})
+        return sum(1 for k, v in self.values().items() if v and k not in {"sort", "q"})
 
-    def apply(self, qs: QuerySet[Company] | None = None) -> list[Company] | QuerySet[Company]:
-        """Aplica los filtros. "Abierto ahora" se evalúa en Python (horarios OSM): devuelve lista."""
+    def apply(
+        self, qs: QuerySet[Company] | None = None, after: Company | None = None
+    ) -> list[Company] | QuerySet[Company]:
+        """Aplica los filtros. "Abierto ahora" se evalúa en Python (horarios OSM): devuelve lista.
+
+        `after`: solo las empresas que van detrás de esa en el orden elegido ("Cargar más").
+        """
         qs = qs if qs is not None else base_queryset()
-        if not self.is_valid():
-            return qs
-        data = self.cleaned_data
+        data = self.values()
         if data["q"]:
             qs = qs.filter(
                 Q(name__icontains=data["q"]) | Q(enrichment__services__icontains=data["q"])
@@ -96,18 +109,51 @@ class CompanyFilter(forms.Form):
             qs = qs.filter(favorite__isnull=False)
         if data["offers"]:
             qs = qs.filter(has_offers=True)
-        qs = qs.order_by(*ORDERINGS[data["sort"] or "encaje"])
+        sort = data["sort"] or "encaje"
+        if after is not None:
+            qs = qs.filter(_after(sort, after))
+        qs = qs.order_by(*ORDERINGS[sort])
         if data["open_now"]:
             now = timezone.localtime()
             return [c for c in qs if opening_for(c.opening_hours).is_open(now)]
         return qs
 
 
+# El pk final desempata: el orden es total y "Cargar más" puede seguir desde una empresa.
 ORDERINGS = {
-    "encaje": [F("enrichment__fit_score").desc(nulls_last=True), "-confidence_score", "name"],
-    "confianza": ["-confidence_score", "name"],
-    "nombre": ["name"],
+    "encaje": [
+        F("enrichment__fit_score").desc(nulls_last=True),
+        "-confidence_score",
+        "name",
+        "pk",
+    ],
+    "confianza": ["-confidence_score", "name", "pk"],
+    "nombre": ["name", "pk"],
 }
+
+
+def _after(sort: str, anchor: Company) -> Q:
+    """Empresas que van detrás de `anchor` en el orden `sort` (paginación por cursor, sin OFFSET).
+
+    El cursor no depende de que `anchor` siga en la lista: si se quita de favoritas o cierra
+    mientras tanto, la siguiente tanda no se salta ni repite tarjetas.
+    """
+    by_name = Q(name__gt=anchor.name) | Q(name=anchor.name, pk__gt=anchor.pk)
+    if sort == "nombre":
+        return by_name
+    confidence = anchor.confidence_score
+    by_confidence = Q(confidence_score__lt=confidence) | (Q(confidence_score=confidence) & by_name)
+    if sort == "confianza":
+        return by_confidence
+    enrichment = getattr(anchor, "enrichment", None)
+    score = enrichment.fit_score if enrichment else None
+    if score is None:  # los sin puntuar van al final
+        return Q(enrichment__fit_score__isnull=True) & by_confidence
+    return (
+        Q(enrichment__fit_score__lt=score)
+        | Q(enrichment__fit_score__isnull=True)
+        | (Q(enrichment__fit_score=score) & by_confidence)
+    )
 
 
 def base_queryset() -> QuerySet[Company]:

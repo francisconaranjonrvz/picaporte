@@ -2,6 +2,7 @@
 
 import json
 
+from django.contrib import messages
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
@@ -61,6 +62,8 @@ def ruta_crear(request):
         return render(request, "routes/ruta.html", context, status=400)
     data = form.cleaned_data
     services.create_route(data["date"], data["slot"], data["zone"], data["size"], form.start)
+    if form.location_ignored:
+        messages.info(request, "Tu ubicación está fuera de Barcelona: salgo del centro de la zona.")
     return redirect("ruta")
 
 

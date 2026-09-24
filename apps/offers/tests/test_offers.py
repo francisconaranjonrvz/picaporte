@@ -87,6 +87,71 @@ def test_formatos_invalidos(data, message):
         parse("x.csv", data)
 
 
+def test_tsv_con_comillas_no_fusiona_filas():
+    """career-ops no escapa: un título que empieza por comillas no abre un campo."""
+    lines = CAREER_OPS.splitlines()[:1] + [
+        f"https://sol.es/{i}\t{RECENT}\tweb\t{title}\tSol\tadded\tBarcelona"
+        for i, title in enumerate(['"Growth lead', "Copy", "PR", 'Cuentas "senior"', "Eventos"])
+    ]
+    result = parse("scan-history.tsv", "\n".join(lines).encode())
+    assert [r.title for r in result.rows] == [
+        '"Growth lead',
+        "Copy",
+        "PR",
+        'Cuentas "senior"',
+        "Eventos",
+    ]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"[" * 100_000,
+        b'[{"score": ' + b"9" * 5000 + b"}]",
+        b'titulo,empresa,url\n"' + b"x" * 200_000,
+    ],
+    ids=["json-anidado", "entero-enorme", "csv-comilla-sin-cerrar"],
+)
+def test_archivos_malformados_no_dan_500(data):
+    with pytest.raises(ImportFormatError, match="formato no es v"):
+        parse("x.json" if data.startswith(b"[") else "x.csv", data)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2025-03-15", date(2025, 3, 15)),
+        ("2025-03-15T10:00:00Z", date(2025, 3, 15)),
+        ("15/03/2025", date(2025, 3, 15)),
+        ("15/03/2025 10:30", date(2025, 3, 15)),
+        ("15-03-2025", date(2025, 3, 15)),
+        ("15/03/25", date(2025, 3, 15)),
+        ("mañana", None),
+        ("", None),
+    ],
+)
+def test_fechas_iso_y_de_excel_en_espanol(value, expected):
+    assert importers._date(value) == expected
+
+
+def test_csv_de_excel_con_fecha_antigua_no_sale_como_activa(db):
+    csv_text = "Título;Empresa;Enlace;Fecha\nJunior PR;Sol;https://sol.es/empleo;15/03/2025\n"
+    services.import_offers(parse("ofertas.csv", csv_text.encode("cp1252")))
+    offer = JobOffer.objects.get()
+    assert offer.published_on == date(2025, 3, 15)
+    assert not active_offers().exists()
+
+
+def test_reimportar_una_oferta_sin_fecha_la_mantiene_activa(db):
+    csv_text = "title,company,url\nJunior PR,Sol,https://sol.es/empleo\n"
+    services.import_offers(parse("ofertas.csv", csv_text.encode()))
+    JobOffer.objects.update(imported_at=timezone.now() - timedelta(days=60))
+    assert not active_offers().exists()
+
+    services.import_offers(parse("ofertas.csv", csv_text.encode()))  # sigue en el export
+    assert active_offers().count() == 1
+
+
 def test_archivo_demasiado_grande(monkeypatch):
     monkeypatch.setattr(importers, "MAX_BYTES", 10)
     with pytest.raises(ImportFormatError, match="2 MB"):

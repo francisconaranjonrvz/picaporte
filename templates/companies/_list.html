@@ -1,7 +1,7 @@
 {# Resultado de la búsqueda: se sustituye entero al cambiar los filtros (hx-target="#company-list"). #}
 <section id="company-list" aria-live="polite">
-  <p class="mb-2 text-sm text-muted">{{ page.paginator.count }} resultado{{ page.paginator.count|pluralize }}</p>
-  {% if page.paginator.count %}
+  <p class="mb-2 text-sm text-muted">{{ total }} resultado{{ total|pluralize }}</p>
+  {% if total %}
     <ul class="space-y-3">{% include "companies/_list_page.html" %}</ul>
   {% elif not total_active %}
     {% url "datos" as datos_url %}
@@ -10,3 +10,4 @@
     {% include "components/empty_state.html" with icon="search" title="Nada con estos filtros" text="Prueba a quitar algún filtro o a buscar otra palabra." %}
   {% endif %}
 </section>
+{% if oob %}{% include "companies/_filters_count.html" %}{% include "companies/_filters_reset.html" %}{% endif %}

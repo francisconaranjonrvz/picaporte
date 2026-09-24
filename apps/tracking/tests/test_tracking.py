@@ -88,8 +88,10 @@ def test_seguimiento_y_notas_por_htmx(auth_client, sol):
     assert (visit.contact, visit.next_action_on) == ("Marta (cuentas)", date(2026, 10, 1))
 
     resp = auth_client.post(reverse("visit_update", args=[sol.pk]), {"next_action_on": "mañana"})
-    assert resp.status_code == 400
+    # 200 para que htmx 2 haga el swap y se vean los errores (no pinta los 4xx).
+    assert resp.status_code == 200
     assert "field-error" in resp.text
+    assert "HX-Trigger" not in resp  # sin el aviso de "guardado"
 
     resp = auth_client.post(reverse("note_add", args=[sol.pk]), {"text": "Dejé el CV en recepción"})
     assert "Dejé el CV en recepción" in resp.text

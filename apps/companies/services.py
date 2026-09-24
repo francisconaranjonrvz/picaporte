@@ -4,13 +4,13 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from apps.catalog.models import Category, Zone
 
 from .dedupe import MemoryIndex, confidence_score, find_match, merge_into
-from .models import Company, SourceRecord
+from .models import Company, Source, SourceRecord
 from .sources import RawCompany, SourceError, get_adapters
 
 logger = logging.getLogger(__name__)
@@ -129,12 +129,16 @@ class Ingestor:
         created = company is None
         if created:
             company = Company(name=raw.name, first_seen_at=timezone.now())
-            self._new_companies.append(company)
 
         merge_into(company, raw, category=self.categories.get(raw.category_slug or ""))
-        company.zone = zone_for(company.lat, company.lng, self.zones) or company.zone
+        if created:  # tras la fusión: si fallase, no quedaría una empresa a medias en el lote
+            self._new_companies.append(company)
+        manual = {f for f, s in (company.field_sources or {}).items() if s == Source.MANUAL}
+        if "zone" not in manual:
+            company.zone = zone_for(company.lat, company.lng, self.zones) or company.zone
         company.last_seen_at = timezone.now()
-        company.is_active = True  # una empresa retirada que reaparece vuelve a la lista
+        if "is_active" not in manual:  # desactivada a mano en el admin: se respeta
+            company.is_active = True  # una empresa retirada que reaparece vuelve a la lista
         self.index.add(company)
         if company.pk is not None:
             self._dirty[id(company)] = company
@@ -144,14 +148,14 @@ class Ingestor:
                 company=company,
                 source=raw.source,
                 external_id=raw.external_id,
-                name=raw.name,
+                name=raw.name[:200],
                 payload=raw.payload,
             )
             self.records[key] = record
             self.record_company[key] = company
             self._new_records.append(record)
         else:
-            record.name = raw.name
+            record.name = raw.name[:200]
             record.payload = raw.payload
             record.fetched_at = timezone.now()
             if record.pk is not None:
@@ -194,12 +198,24 @@ class Ingestor:
         for key in gone:
             record = self.records.pop(key)
             company = self.record_company.pop(key)
-            self.sources[id(company)].discard(source)
             affected[id(company)] = company
             record_ids.append(record.pk)
+        # Fuentes que les quedan, contadas desde los registros vivos: una empresa con
+        # varios registros de la misma fuente la conserva aunque se retire uno.
+        left: dict[int, set[str]] = defaultdict(set)
+        for (src, _), company in self.record_company.items():
+            if id(company) in affected:
+                left[id(company)].add(src)
         for company in affected.values():
-            remaining = len(self.sources[id(company)])
-            company.is_active = remaining > 0
+            self.sources[id(company)] = left[id(company)]
+            remaining = len(left[id(company)])
+            if source not in left[id(company)]:
+                # Libera los campos de la fuente retirada: las que quedan podrán actualizarlos.
+                company.field_sources = {
+                    f: s for f, s in (company.field_sources or {}).items() if s != source
+                }
+            if (company.field_sources or {}).get("is_active") != Source.MANUAL:
+                company.is_active = remaining > 0
             company.confidence_score = confidence_score(company, remaining)
             self._dirty[id(company)] = company
         with transaction.atomic():
@@ -234,7 +250,15 @@ def run_discovery(
                 stats.fetched += 1
                 if ingestor is None:
                     continue
-                _, outcome = ingestor.add(raw)
+                try:
+                    _, outcome = ingestor.add(raw)
+                except DatabaseError:
+                    raise  # fallo al volcar el lote: no es culpa de este registro
+                except Exception:
+                    # Un registro anómalo no debe tumbar la fuente ni las siguientes.
+                    stats.skipped += 1
+                    logger.exception("Fuente %s: omitido %s", adapter.name, raw.external_id)
+                    continue
                 if outcome == "created":
                     stats.created += 1
                 else:

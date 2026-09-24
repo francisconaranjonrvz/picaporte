@@ -1,9 +1,9 @@
-{# Una página de tarjetas + el botón para la siguiente (se reemplaza a sí mismo al cargar más). #}
-{% for company in page.object_list %}{% include "companies/_company_card.html" %}{% endfor %}
-{% if page.has_next %}
+{# Una tanda de tarjetas + el botón para la siguiente (se reemplaza a sí mismo al cargar más). #}
+{% for company in companies %}{% include "companies/_company_card.html" %}{% endfor %}
+{% if next_after %}
 <li id="load-more" class="pt-1">
   <button type="button" class="chip mx-auto flex min-h-11 justify-center px-5"
-          hx-get="{% url 'explorar' %}?{% if query %}{{ query }}&{% endif %}page={{ page.next_page_number }}"
+          hx-get="{% url 'explorar' %}?{% if query %}{{ query }}&{% endif %}after={{ next_after }}"
           hx-target="#load-more" hx-swap="outerHTML" hx-indicator="#load-more">
     Cargar más
   </button>

@@ -14,6 +14,9 @@ from django.utils import timezone
 
 from apps.companies.models import Company
 
+# Extracciones fallidas seguidas con las mismas páginas antes de rendirse hasta el re-rastreo.
+MAX_EXTRACTION_ATTEMPTS = 3
+
 
 class CompanyPage(models.Model):
     """Texto visible de una página de la web de la empresa (la caché del rastreo)."""
@@ -99,6 +102,9 @@ class Enrichment(models.Model):
     extracted_pages_hash = models.CharField(max_length=64, blank=True)
     extraction_model = models.CharField(max_length=64, blank=True)
     extraction_prompt_version = models.CharField(max_length=64, blank=True)
+    extraction_attempts = models.PositiveSmallIntegerField(
+        "extracciones fallidas seguidas", default=0
+    )
 
     # Puntuación (IA, perfil + empresa)
     fit_score = models.PositiveSmallIntegerField("encaje (0-100)", null=True, blank=True)
@@ -122,6 +128,10 @@ class Enrichment(models.Model):
 
     @property
     def needs_extraction(self) -> bool:
-        return self.crawl_status == self.CrawlStatus.OK and (
-            self.extracted_pages_hash != self.pages_hash
+        """Páginas nuevas sin analizar. Tras `MAX_EXTRACTION_ATTEMPTS` fallos se deja de
+        intentar (y se puntúa sin datos extraídos) hasta el próximo rastreo."""
+        return (
+            self.crawl_status == self.CrawlStatus.OK
+            and self.extracted_pages_hash != self.pages_hash
+            and self.extraction_attempts < MAX_EXTRACTION_ATTEMPTS
         )

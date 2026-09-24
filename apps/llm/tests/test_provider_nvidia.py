@@ -142,6 +142,76 @@ def test_si_devuelve_el_esquema_se_le_dice_claramente(provider):
     assert "nunca el esquema" in provider.fake.calls[0]["messages"][0]["content"]
 
 
+def test_datos_envueltos_en_la_forma_del_esquema_se_aceptan(provider):
+    wrapped = (
+        '{"properties": {"nombre": "Laura", "etiquetas": ["eventos"]}, '
+        '"required": ["nombre", "etiquetas"], "title": "Salida"}'
+    )
+    provider.fake.outcomes = [_response(wrapped)]
+
+    assert _complete(provider).output == Salida(nombre="Laura", etiquetas=["eventos"])
+    assert len(provider.fake.calls) == 1  # sin reparación
+
+
+def test_esquema_sin_type_tambien_se_reconoce(provider):
+    echo = '{"properties": {"nombre": {"title": "Nombre"}}, "required": ["nombre"]}'
+    provider.fake.outcomes = [_response(echo), _response('{"nombre": "Laura", "etiquetas": []}')]
+
+    assert _complete(provider).output.nombre == "Laura"
+    assert "esquema JSON, no los datos" in provider.fake.calls[1]["messages"][3]["content"]
+
+
+def test_pdf_cifrado_con_aes_falla_claro(monkeypatch):
+    from pypdf.errors import DependencyError
+
+    from apps.llm.providers import nvidia
+
+    def reader(stream):
+        raise DependencyError("cryptography>=3.1 is required for AES algorithm")
+
+    monkeypatch.setattr(nvidia, "PdfReader", reader)
+    with pytest.raises(LLMError, match="protegido"):
+        extract_pdf_text(b"%PDF-1.7 cifrado")
+
+
+def _slow_clock(monkeypatch, provider, seconds_per_call):
+    """Reloj falso: cada llamada a la API tarda `seconds_per_call` segundos."""
+    from apps.llm.providers import nvidia
+
+    now = [0.0]
+    monkeypatch.setattr(nvidia, "_now", lambda: now[0])
+    create = provider.fake.create
+
+    def slow_create(**kwargs):
+        now[0] += seconds_per_call
+        return create(**kwargs)
+
+    provider.fake.create = slow_create
+
+
+def test_sin_tiempo_para_la_reparacion_falla_sin_llamar(provider, monkeypatch, settings):
+    settings.LLM_TIMEOUT = 90
+    _slow_clock(monkeypatch, provider, 100)
+    provider.fake.outcomes = [_response('{"nombre": "Laura"}'), _response("{}")]
+
+    with pytest.raises(LLMError, match="JSON no válido"):
+        _complete(provider)
+    assert len(provider.fake.calls) == 1
+    assert provider.fake.calls[0]["timeout"] == 90
+
+
+def test_la_reparacion_usa_solo_el_tiempo_que_queda(provider, monkeypatch, settings):
+    settings.LLM_TIMEOUT = 90
+    _slow_clock(monkeypatch, provider, 70)
+    provider.fake.outcomes = [
+        _response('{"nombre": "Laura"}'),
+        _response('{"nombre": "Laura", "etiquetas": []}'),
+    ]
+
+    assert _complete(provider).output.nombre == "Laura"
+    assert provider.fake.calls[1]["timeout"] == pytest.approx(40)  # 110 - 70
+
+
 def test_dos_json_invalidos_es_error(provider):
     provider.fake.outcomes = [_response("nada"), _response("{}")]
 

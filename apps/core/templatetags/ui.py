@@ -85,3 +85,10 @@ def icon(name, cls="size-5"):
         cls,
         name,
     )
+
+
+@register.filter
+def http_url(value):
+    """La URL si es http(s); si no, vacío (evita enlaces relativos rotos y `javascript:`)."""
+    value = str(value or "")
+    return value if value.lower().startswith(("http://", "https://")) else ""

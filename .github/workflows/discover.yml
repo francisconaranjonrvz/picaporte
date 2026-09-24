@@ -47,7 +47,18 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --no-dev --group worker
       - name: Descubrir empresas
-        run: >-
-          uv run python manage.py discover
-          ${{ inputs.sources && format('--sources {0}', inputs.sources) || '' }}
-          ${{ inputs.job_id && format('--job-id {0}', inputs.job_id) || '' }}
+        # Los inputs van por env y se validan: interpolarlos en el script permitiría inyectar órdenes.
+        env:
+          SOURCES: ${{ inputs.sources }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          args=()
+          if [[ -n "$SOURCES" ]]; then
+            [[ "$SOURCES" =~ ^[a-z0-9_,-]+$ ]] || { echo "sources no válido" >&2; exit 1; }
+            args+=(--sources "$SOURCES")
+          fi
+          if [[ -n "$JOB_ID" ]]; then
+            [[ "$JOB_ID" =~ ^[0-9]+$ ]] || { echo "job_id no válido" >&2; exit 1; }
+            args+=(--job-id "$JOB_ID")
+          fi
+          uv run python manage.py discover "${args[@]}"

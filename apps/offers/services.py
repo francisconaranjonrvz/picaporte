@@ -87,7 +87,9 @@ def import_offers(result: ParseResult) -> ImportStats:
     now = timezone.now()
     for row in {r.url: r for r in result.rows}.values():  # URLs repetidas: gana la última
         company, how = matcher.match(row.company, row.url)
-        offer = existing.get(row.url) or JobOffer(url=row.url, imported_at=now)
+        offer = existing.get(row.url) or JobOffer(url=row.url)
+        # Última vez vista: las ofertas sin fecha siguen activas mientras se reimporten.
+        offer.imported_at = now
         offer.title = row.title
         offer.company_name = row.company
         offer.portal = row.portal
@@ -116,6 +118,7 @@ def import_offers(result: ParseResult) -> ImportStats:
             "match",
             "source",
             "payload",
+            "imported_at",
         ],
         batch_size=500,
     )

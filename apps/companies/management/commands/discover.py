@@ -53,6 +53,8 @@ class Command(BaseCommand):
                 )
                 if s.retired:
                     line += f", {s.retired} retiradas"
+                if s.skipped:
+                    line += f", {s.skipped} omitidas por error"
                 lines.append(line)
         summary = "\n".join(lines) + (" (dry-run)" if dry_run else "")
         errors = [f"{n}: {s.error}" for n, s in results.items() if s.error]

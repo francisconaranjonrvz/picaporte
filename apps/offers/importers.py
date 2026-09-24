@@ -16,7 +16,7 @@ import csv
 import io
 import json
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 
 MAX_BYTES = 2 * 1024 * 1024
 CAREER_OPS_HEADER = ["url", "first_seen", "portal", "title", "company", "status", "location"]
@@ -29,6 +29,7 @@ ALIASES = {
     "score": ("score", "puntuacion", "puntuación", "nota"),
     "location": ("location", "ubicacion", "ubicación", "ciudad", "city"),
 }
+DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d", "%d/%m/%y")
 
 
 class ImportFormatError(ValueError):
@@ -55,11 +56,21 @@ class ParseResult:
 
 
 def _date(value: str | None) -> date | None:
-    value = (value or "").strip()[:10]
-    try:
-        return date.fromisoformat(value) if value else None
-    except ValueError:
+    """ISO o dd/mm/aaaa (Excel en español); con hora detrás también vale."""
+    value = (value or "").strip()
+    if not value:
         return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    head = value.split()[0]
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(head, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _score(value) -> float | None:
@@ -91,7 +102,8 @@ def _row(title, company, url, **extra) -> OfferRow | None:
 
 def parse_career_ops(text: str) -> ParseResult:
     rows, skipped = [], 0
-    reader = csv.reader(io.StringIO(text), delimiter="\t")
+    # TSV crudo, sin escapado: una comilla al principio de un campo es un carácter más.
+    reader = csv.reader(io.StringIO(text), delimiter="\t", quoting=csv.QUOTE_NONE)
     next(reader, None)  # cabecera
     for cells in reader:
         if not any(cells):
@@ -150,6 +162,16 @@ def _from_records(records: list[dict], source: str) -> ParseResult:
 
 def parse(filename: str, data: bytes) -> ParseResult:
     """Detecta el formato por contenido (y extensión) y devuelve las filas."""
+    try:
+        return _parse(filename, data)
+    except ImportFormatError:
+        raise
+    except (csv.Error, RecursionError, ValueError) as exc:
+        # CSV mal formado, JSON demasiado anidado o con números enormes.
+        raise ImportFormatError("No se puede leer el archivo: el formato no es válido.") from exc
+
+
+def _parse(filename: str, data: bytes) -> ParseResult:
     text = _decode(data).strip()
     if not text:
         raise ImportFormatError("El archivo está vacío.")
